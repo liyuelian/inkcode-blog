@@ -1,9 +1,9 @@
-# 每次推送到 main 分支（包括在手机后台点「发布」），自动生成网站并发布到 GitHub Pages。
+# 每次推送到 master 分支（包括在手机后台点「发布」），自动生成网站并发布到 GitHub Pages。
 name: 生成并发布网站
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
