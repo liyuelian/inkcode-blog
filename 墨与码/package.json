@@ -1,0 +1,18 @@
+{
+  "name": "inkcode-site",
+  "version": "2.0.0",
+  "private": true,
+  "description": "墨与码：技术博客与小说网站，部署在 GitHub Pages，用手机后台写作发布",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "node scripts/build.js && node scripts/serve.js",
+    "import": "node scripts/import-backup.js"
+  },
+  "dependencies": {
+    "highlight.js": "11.9.0",
+    "marked": "4.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

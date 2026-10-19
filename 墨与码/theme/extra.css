@@ -1,0 +1,8 @@
+/* ---------- 静态网站补充样式 ---------- */
+a.mode-btn{color:var(--fg2)}
+.blog-search{margin:6px 0 0}
+.chips:not(.open) .chip.extra{display:none}
+.foot-r a:hover{color:var(--accent)}
+.s-type{display:inline-block;margin-right:8px;padding:0 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent);font-family:var(--font-ui);font-size:12px;font-weight:600;line-height:1.7;vertical-align:3px}
+.pi-sum mark{background:var(--sel);color:inherit;border-radius:2px;padding:0 1px}
+@media (max-width:380px){.nav-links a{padding:8px 7px}.nav-in{gap:4px}}

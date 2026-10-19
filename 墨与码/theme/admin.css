@@ -1,0 +1,14 @@
+/* ---------- 手机后台补充样式 ---------- */
+.draft-badge{display:inline-block;margin-right:8px;padding:0 6px;border:1px dashed var(--muted);border-radius:4px;color:var(--muted);font-family:var(--font-ui);font-size:12px;font-weight:600;line-height:1.6;vertical-align:2px}
+.ed-btns{display:flex;gap:8px}
+.page-head .link-btn{font-size:14px}
+.build-bar{position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:90;display:flex;align-items:center;gap:10px;max-width:520px;margin:0 auto;padding:10px 12px 10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg2);color:var(--fg);font-family:var(--font-ui);font-size:14px;line-height:1.5;box-shadow:0 12px 30px -14px var(--shadow)}
+.build-bar>span:not(.spin){flex:1}
+.build-bar a{color:var(--accent);font-weight:600;white-space:nowrap}
+.build-bar .bb-x{flex:none;width:28px;height:28px;border:none;background:none;color:var(--muted);cursor:pointer}
+.build-bar.done{border-color:var(--accent)}
+.login .hint{margin-top:16px}
+.login .btn.ghost{margin-top:20px}
+.token-help{margin-top:22px;padding:14px;border:1px solid var(--line);border-radius:var(--radius);font-family:var(--font-ui);font-size:14px;line-height:1.7;color:var(--fg2)}
+.token-help p{margin:0 0 12px}
+.token-help b{color:var(--fg)}
