@@ -766,6 +766,7 @@ function mountFormDraft(main, cfg) {
     },
     flush: function () { save.flush(); },
     change: function () {
+      if (!touched && !dirty()) return;
       touched = true; slot.innerHTML = '';
       status.textContent = dirty() ? '正在暂存到本机…' : '';
       save();
