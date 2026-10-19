@@ -5,6 +5,7 @@ template: "sun"
 cover: "yue"
 author: "竹下窥月"
 created: "2026-10-19T12:40:04.026Z"
+updated: "2026-10-19T12:44:05.257Z"
 chapters: ["mvf8vh0pi3th"]
 ---
 
