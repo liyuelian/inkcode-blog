@@ -123,5 +123,23 @@
 
   function isContentPath(p) { return p === 'content/site.json' || /^content\/(posts|novels)\/.+\.(md|json)$/.test(p); }
 
-  return { parse: parse, stringify: stringify, modelFromFiles: modelFromFiles, filesFromModel: filesFromModel, isContentPath: isContentPath, ID: ID };
+  /* 保守检查：正文、草稿、设置中提到文件名就保留，也识别编码网址和旧版 img:编号。 */
+  function unusedImagePaths(paths, files, extraText) {
+    var text = Object.keys(files).map(function (p) { return String(files[p] || ''); }).join('\n') + '\n' + (extraText || '');
+    text = text.replace(/%(?:[0-9a-f]{2})(?:%[0-9a-f]{2})*/gi, function (s) {
+      try { return decodeURIComponent(s); } catch (e) { return s; }
+    }).replace(/&#(x[0-9a-f]+|\d+);/gi, function (all, code) {
+      var n = code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : parseInt(code, 10);
+      return n <= 0x10ffff ? String.fromCodePoint(n) : all;
+    });
+    var lowerText = text.toLowerCase();
+    return paths.filter(function (p) {
+      var m = /^static\/images\/([A-Za-z0-9_-]+)\.(webp|jpe?g|png|gif)$/i.exec(p);
+      if (!m) return false;
+      var name = p.slice('static/images/'.length);
+      return text.indexOf(name) < 0 && lowerText.indexOf('img:' + m[1].toLowerCase()) < 0;
+    });
+  }
+
+  return { parse: parse, stringify: stringify, modelFromFiles: modelFromFiles, filesFromModel: filesFromModel, isContentPath: isContentPath, unusedImagePaths: unusedImagePaths, ID: ID };
 });

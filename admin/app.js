@@ -63,7 +63,8 @@ function store(kind) {
   return {
     get: function (k) { try { return s ? s.getItem(k) : null; } catch (e) { return null; } },
     set: function (k, v) { try { if (s) { s.setItem(k, v); return true; } } catch (e) {} return false; },
-    del: function (k) { try { if (s) s.removeItem(k); } catch (e) {} }
+    del: function (k) { try { if (s) s.removeItem(k); } catch (e) {} },
+    keys: function (prefix) { try { return s ? Object.keys(s).filter(function (k) { return k.indexOf(prefix) === 0; }) : []; } catch (e) { return []; } }
   };
 }
 var LS = store('localStorage'), SS = store('sessionStorage');
@@ -507,14 +508,6 @@ function copyText(t) {
   return Promise.resolve(legacy());
 }
 
-/* ---------- 发布：把新数据写回页面本身 ---------- */
-function gcImages(d) {
-  var used = {};
-  d.posts.forEach(function (p) {
-    (p.content.match(/img:([a-z0-9]+)/gi) || []).forEach(function (m) { used[m.slice(4)] = 1; });
-  });
-  Object.keys(d.images).forEach(function (k) { if (!used[k]) delete d.images[k]; });
-}
 /* ---------- GitHub 接口 ---------- */
 function gh(method, path, body) {
   var headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
@@ -539,12 +532,13 @@ function headSha() {
   return gh('GET', repoPath('/git/ref/heads/' + encodeURIComponent(GH.branch))).then(function (r) { return r.object.sha; });
 }
 /* 把一组变更文件从仓库读进 FILES */
-function pullChanges(sha, list) {
+function pullChanges(sha, list, target) {
+  target = target || FILES;
   return Promise.all(list.map(function (f) {
-    if (f.previous_filename && SiteFiles.isContentPath(f.previous_filename)) delete FILES[f.previous_filename];
+    if (f.previous_filename && SiteFiles.isContentPath(f.previous_filename)) delete target[f.previous_filename];
     if (!SiteFiles.isContentPath(f.filename)) return null;
-    if (f.status === 'removed') { delete FILES[f.filename]; return null; }
-    return rawFile(sha, f.filename).then(function (t) { FILES[f.filename] = t; });
+    if (f.status === 'removed') { delete target[f.filename]; return null; }
+    return rawFile(sha, f.filename).then(function (t) { target[f.filename] = t; });
   }));
 }
 function pullAll(sha) {
@@ -575,6 +569,22 @@ function loadContent() {
     });
   });
 }
+/* 用本次提交后的全部内容检查图片；先补齐别处的新内容，并保留本机草稿引用。 */
+function unusedImagesForCommit(head, treeSha, upstream, changes, binaries, deletions) {
+  return gh('GET', repoPath('/git/trees/' + treeSha + '?recursive=1')).then(function (tree) {
+    // 引用信息不完整时不清理；正文提交仍可继续。
+    if (tree.truncated || upstream.length >= 300) return [];
+    var files = Object.assign({}, FILES);
+    return pullChanges(head, upstream, files).then(function () {
+      Object.keys(changes).forEach(function (p) { if (SiteFiles.isContentPath(p)) files[p] = changes[p]; });
+      deletions.forEach(function (p) { delete files[p]; });
+      var paths = tree.tree.filter(function (e) { return e.type === 'blob'; }).map(function (e) { return e.path; });
+      if (paths.some(function (p) { return SiteFiles.isContentPath(p) && !(p in files) && deletions.indexOf(p) < 0; })) return [];
+      var drafts = LS.keys(NS + 'draft:').map(function (key) { return LS.get(key) || ''; }).join('\n');
+      return SiteFiles.unusedImagePaths(paths, files, drafts).filter(function (p) { return !(p in binaries) && deletions.indexOf(p) < 0; });
+    });
+  });
+}
 /* 一次提交多个文件：changes 为文本文件，binaries 为 base64 图片，deletions 为要删除的路径 */
 function ghCommit(changes, binaries, deletions, message) {
   return headSha().then(function (head) {
@@ -586,19 +596,21 @@ function ghCommit(changes, binaries, deletions, message) {
       var touched = Object.keys(changes).concat(Object.keys(binaries), deletions);
       if (touched.some(function (p) { return names[p]; })) { var e = new Error('conflict'); e.code = 'conflict'; throw e; }
       return gh('GET', repoPath('/git/commits/' + head)).then(function (hc) {
-        return Promise.all(Object.keys(binaries).map(function (p) {
-          return gh('POST', repoPath('/git/blobs'), { content: binaries[p], encoding: 'base64' }).then(function (b) {
-            return { path: p, mode: '100644', type: 'blob', sha: b.sha };
-          });
-        })).then(function (bin) {
-          var tree = bin.concat(Object.keys(changes).map(function (p) { return { path: p, mode: '100644', type: 'blob', content: changes[p] }; }))
-            .concat(deletions.map(function (p) { return { path: p, mode: '100644', type: 'blob', sha: null }; }));
-          return gh('POST', repoPath('/git/trees'), { base_tree: hc.tree.sha, tree: tree });
-        }).then(function (t) {
-          return gh('POST', repoPath('/git/commits'), { message: message, tree: t.sha, parents: [head] });
-        }).then(function (nc) {
-          return gh('PATCH', repoPath('/git/refs/heads/' + encodeURIComponent(GH.branch)), { sha: nc.sha }).then(function () {
-            return { sha: nc.sha, upstream: ups };
+        return unusedImagesForCommit(head, hc.tree.sha, ups, changes, binaries, deletions).then(function (unused) {
+          return Promise.all(Object.keys(binaries).map(function (p) {
+            return gh('POST', repoPath('/git/blobs'), { content: binaries[p], encoding: 'base64' }).then(function (b) {
+              return { path: p, mode: '100644', type: 'blob', sha: b.sha };
+            });
+          })).then(function (bin) {
+            var tree = bin.concat(Object.keys(changes).map(function (p) { return { path: p, mode: '100644', type: 'blob', content: changes[p] }; }))
+              .concat(deletions.concat(unused).map(function (p) { return { path: p, mode: '100644', type: 'blob', sha: null }; }));
+            return gh('POST', repoPath('/git/trees'), { base_tree: hc.tree.sha, tree: tree });
+          }).then(function (t) {
+            return gh('POST', repoPath('/git/commits'), { message: message, tree: t.sha, parents: [head] });
+          }).then(function (nc) {
+            return gh('PATCH', repoPath('/git/refs/heads/' + encodeURIComponent(GH.branch)), { sha: nc.sha }).then(function () {
+              return { sha: nc.sha, upstream: ups, removedImages: unused };
+            });
           });
         });
       });
@@ -659,6 +671,7 @@ function commit(mutate, opts) {
   run().then(function (r) {
     Object.keys(changes).forEach(function (k) { FILES[k] = changes[k]; });
     deletions.forEach(function (k) { delete FILES[k]; });
+    r.removedImages.forEach(function (p) { delete LOCAL_IMAGES[p.slice('static'.length)]; });
     Object.keys(localImgs).forEach(function (k) { LOCAL_IMAGES[k] = localImgs[k]; });
     return (r.upstream.length ? pullChanges(r.sha, r.upstream) : Promise.resolve()).then(function () {
       BASE_SHA = r.sha;
@@ -668,7 +681,7 @@ function commit(mutate, opts) {
       busy(false); busyNow = false;
       if (opts.returnTo) setHash(opts.returnTo);
       render();
-      toast(opts.toast || '已提交');
+      toast((opts.toast || '已提交') + (r.removedImages.length ? '，已清理 ' + r.removedImages.length + ' 张未使用图片' : ''));
       watchBuild(r.sha, opts.live);
     });
   }).catch(function (err) {
@@ -1544,12 +1557,42 @@ function dataUriBytes(uri) {
 }
 function imageBytes(src) {
   var b = dataUriBytes(src);
-  if (b) return Promise.resolve(b);
-  return fetch(src, { credentials: 'same-origin' }).then(function (r) {
-    if (!r.ok) return null;
+  if (b) return b.bytes.length ? Promise.resolve(b) : Promise.reject(new Error('图片为空'));
+  return fetchBackupImage(src).then(function (blob) {
     var ext = (/\.(\w+)(\?|$)/.exec(src) || [])[1] || 'jpg';
-    return r.arrayBuffer().then(function (buf) { return { bytes: new Uint8Array(buf), ext: ext }; });
-  }).catch(function () { return null; });
+    return blob.arrayBuffer().then(function (buf) { return { bytes: new Uint8Array(buf), ext: ext }; });
+  });
+}
+function fetchBackupImage(src) {
+  return new Promise(function (resolve, reject) {
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); reject(new Error('读取图片超时')); }, 20000);
+    fetch(src, { credentials: 'same-origin', signal: ctrl ? ctrl.signal : undefined }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).then(function (blob) {
+      if (!blob.size) throw new Error('图片为空');
+      return blob;
+    }).then(function (blob) { clearTimeout(timer); resolve(blob); }, function (err) { clearTimeout(timer); reject(err); });
+  });
+}
+function collectBackupImages(d, read) {
+  var ids = Object.keys(d.images);
+  return Promise.all(ids.map(function (id) {
+    return Promise.resolve().then(function () { return read(resolveImg(d.images[id])); })
+      .then(function (value) { return value || null; }, function () { return null; });
+  })).then(function (values) {
+    var missing = ids.filter(function (id, i) { return !values[i]; });
+    if (missing.length) {
+      var err = new Error('有 ' + missing.length + ' 张图片读取失败，本次未导出。请检查网络后重试：' + missing.slice(0, 3).map(function (id) {
+        return d.images[id].split('/').pop();
+      }).join('、') + (missing.length > 3 ? ' 等' : ''));
+      err.code = 'backup-images'; throw err;
+    }
+    var images = {};
+    ids.forEach(function (id, i) { images[id] = values[i]; });
+    return images;
+  });
 }
 /* 导出用：把正文里的 /images/xxx 换回 img:编号，图片单独列出，和旧版备份格式一致 */
 function portableData() {
@@ -1564,22 +1607,17 @@ function blobToDataUri(b) {
   return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(b); });
 }
 function portableBackup() {
-  var d = portableData(), ids = Object.keys(d.images);
-  return Promise.all(ids.map(function (id) {
-    var src = resolveImg(d.images[id]);
-    if (/^data:/.test(src)) return src;
-    return fetch(src).then(function (r) { return r.ok ? r.blob() : null; }).then(function (b) { return b ? blobToDataUri(b) : null; }).catch(function () { return null; });
-  })).then(function (list) {
-    var images = {};
-    ids.forEach(function (id, i) { if (list[i]) images[id] = list[i]; });
+  var d = portableData();
+  return collectBackupImages(d, function (src) {
+    if (/^data:/.test(src)) { var b = dataUriBytes(src); return b && b.bytes.length ? src : null; }
+    return fetchBackupImage(src).then(blobToDataUri);
+  }).then(function (images) {
     return JSON.stringify({ format: BACKUP_FORMAT, version: 1, exportedAt: nowISO(), site: d.site, posts: d.posts, novels: d.novels, images: images });
   });
 }
 function buildMarkdownZip(JSZip) {
-  var d = portableData(), ids = Object.keys(d.images);
-  return Promise.all(ids.map(function (id) { return imageBytes(resolveImg(d.images[id])); })).then(function (list) {
-    var bytes = {};
-    ids.forEach(function (id, i) { if (list[i]) bytes[id] = list[i]; });
+  var d = portableData();
+  return collectBackupImages(d, imageBytes).then(function (bytes) {
     return buildZipWith(JSZip, bytes, d);
   });
 }
@@ -1664,7 +1702,7 @@ function backupTab() {
   var last = lastBackup();
   var html = '<p class="notice">网站内容保存在 GitHub 仓库里，每次提交都有完整的历史记录。另外再定期下载一份备份到自己的设备上，最稳妥。</p>' +
     '<div class="bk-stat"><div><b>' + d.posts.length + '</b><span>篇文章</span></div><div><b>' + d.novels.length + '</b><span>部小说</span></div>' +
-    '<div><b>' + chs + '</b><span>个章节</span></div><div><b>' + Object.keys(d.images).length + '</b><span>张图片</span></div></div>' +
+    '<div><b>' + chs + '</b><span>个章节</span></div><div><b>' + Object.keys(portableData().images).length + '</b><span>张图片</span></div></div>' +
     '<p class="bk-last">' + (last ? '这台设备上次备份：' + fmtTime(last) : '这台设备还没有下载过备份') + '</p>' +
     '<div class="bk-card"><h3>完整备份</h3><p>一个 .json 文件，包含所有文章、小说、图片和网站设置，用来恢复网站，也可以搬到另一台服务器。</p>' +
     '<button type="button" class="btn primary block" id="bk-json">下载完整备份</button></div>' +
@@ -1686,8 +1724,8 @@ function backupTab() {
           markBackedUp();
           $('.bk-last', main).textContent = '这台设备上次备份：' + fmtTime(Date.now());
           toast('已下载完整备份');
-        }, function () {
-          toast('备份没有生成成功，稍后再试一次。');
+        }, function (err) {
+          toast(err && err.code === 'backup-images' ? err.message : '备份没有生成成功，稍后再试一次。');
         }).then(function () {
           jsonBtn.disabled = false;
           jsonBtn.textContent = '下载完整备份';
@@ -1701,8 +1739,8 @@ function backupTab() {
           return saveFile(name + ' 文稿 ' + ymd(Date.now()) + '.zip', blob);
         }).then(function (ok) {
           if (ok) toast('已下载 Markdown 文稿');
-        }, function () {
-          toast('打包工具没有加载成功。检查网络后再试一次。');
+        }, function (err) {
+          toast(err && err.code === 'backup-images' ? err.message : '打包工具没有加载成功。检查网络后再试一次。');
         }).then(function () {
           zipBtn.disabled = false;
           zipBtn.textContent = '下载 Markdown 文稿';
