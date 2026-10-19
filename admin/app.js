@@ -53,6 +53,8 @@ var LOCAL_IMAGES = {};           // 刚提交、网站还没生成好的图片�
 var LOADED = false;
 var PENDING_IMAGES = {};
 var cleanups = [];
+var formDrafts = [];
+var renderedHash = '';
 var busyNow = false;
 
 function store(kind) {
@@ -623,6 +625,7 @@ var EXT = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'imag
 function commit(mutate, opts) {
   if (busyNow) return;
   if (AUTH !== 'yes') { toast('请先连接 GitHub。'); setHash('#/login'); render(); return; }
+  flushFormDrafts();
   var next = clone(DATA);
   mutate(next);
   /* 新插入的图片：存成 static/images/ 里的文件，正文里的 img:编号 换成图片地址 */
@@ -640,7 +643,10 @@ function commit(mutate, opts) {
   var oldF = SiteFiles.filesFromModel(DATA), newF = SiteFiles.filesFromModel(next);
   var changes = {}, deletions = Object.keys(oldF).filter(function (k) { return !(k in newF); });
   Object.keys(newF).forEach(function (k) { if (oldF[k] !== newF[k]) changes[k] = newF[k]; });
-  if (!Object.keys(changes).length && !deletions.length && !Object.keys(binaries).length) { toast('没有需要提交的改动。'); return; }
+  if (!Object.keys(changes).length && !deletions.length && !Object.keys(binaries).length) {
+    if (opts.onSuccess) opts.onSuccess();
+    toast('没有需要提交的改动。'); return;
+  }
   busyNow = true;
   busy(true, '正在提交…');
   var tries = 0;
@@ -658,6 +664,7 @@ function commit(mutate, opts) {
       BASE_SHA = r.sha;
       DATA = normalize(SiteFiles.modelFromFiles(FILES));
       if (opts.clearDraft) dropDraft(opts.clearDraft);
+      if (opts.onSuccess) opts.onSuccess();
       busy(false); busyNow = false;
       if (opts.returnTo) setHash(opts.returnTo);
       render();
@@ -720,6 +727,77 @@ function saveDraft(key, data) {
   return LS.set(NS + 'draft:' + key, JSON.stringify({ t: Date.now(), data: lite }));
 }
 function dropDraft(key) { LS.del(NS + 'draft:' + key); }
+
+/* 作品信息与分卷各自暂存在本机，只有手动保存才提交到仓库。 */
+function flushFormDrafts() { formDrafts.forEach(function (d) { d.flush(); }); }
+function hasUnsavedForms() { return formDrafts.some(function (d) { return d.dirty(); }); }
+function mountFormDraft(main, cfg) {
+  var key = 'form:' + (GH ? GH.repo + ':' + GH.branch : CFG.repo + ':' + CFG.branch) + ':' + cfg.key;
+  var baseline = JSON.stringify(cfg.read()), touched = false;
+  var slot = $(cfg.slot, main), status = $(cfg.status, main);
+  var dirty = function () { return JSON.stringify(cfg.read()) !== baseline; };
+  var persist = function () {
+    if (!touched) return;
+    if (!dirty()) { dropDraft(key); status.textContent = ''; return; }
+    status.textContent = saveDraft(key, cfg.read())
+      ? '已自动暂存在本机 ' + fmtTime(Date.now()).replace('今天 ', '') + '，尚未保存到仓库'
+      : '这台设备无法暂存，请及时手动保存';
+  };
+  var save = debounce(persist, 700);
+  var draft = loadDraft(key);
+  if (draft && JSON.stringify(draft.data) !== baseline) {
+    slot.innerHTML = '<div class="draft-banner"><span>这台设备上有一份 ' + fmtTime(draft.t) + ' 未保存的' + escHtml(cfg.label) + '。</span>' +
+      '<button type="button" class="btn sm primary" data-form-draft="restore">恢复暂存</button>' +
+      '<button type="button" class="btn sm ghost" data-form-draft="discard">丢弃</button></div>';
+    slot.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-form-draft]');
+      if (!b) return;
+      if (b.getAttribute('data-form-draft') === 'restore') {
+        cfg.restore(clone(draft.data)); touched = true; persist();
+      } else { dropDraft(key); status.textContent = '已丢弃本机暂存'; }
+      slot.innerHTML = '';
+    });
+  } else if (draft) dropDraft(key);
+  var tracker = {
+    dirty: dirty,
+    saved: function () {
+      var saved = loadDraft(key);
+      return !!saved && JSON.stringify(saved.data) === JSON.stringify(cfg.read());
+    },
+    flush: function () { save.flush(); },
+    change: function () {
+      touched = true; slot.innerHTML = '';
+      status.textContent = dirty() ? '正在暂存到本机…' : '';
+      save();
+    },
+    accept: function () {
+      save.flush(); baseline = JSON.stringify(cfg.read()); touched = false;
+      dropDraft(key); slot.innerHTML = ''; status.textContent = '已保存';
+    }
+  };
+  formDrafts.push(tracker);
+  cleanups.push(tracker.flush);
+  return tracker;
+}
+
+function restoreChapterPlan(n, saved) {
+  var seen = Object.create(null), vols = (Array.isArray(saved.vols) ? saved.vols : []).filter(function (v) {
+    if (!v || typeof v.id !== 'string' || !SiteFiles.ID.test(v.id) || seen[v.id]) return false;
+    seen[v.id] = true; return true;
+  }).map(function (v) { return { id: v.id, title: typeof v.title === 'string' ? v.title : '' }; });
+  var known = Array.isArray(saved.baseVolumes) ? saved.baseVolumes : n.volumes.map(function (v) { return v.id; });
+  n.volumes.forEach(function (v) {
+    if (known.indexOf(v.id) < 0 && !seen[v.id]) { vols.push({ id: v.id, title: v.title }); seen[v.id] = true; }
+  });
+  var chapters = Object.create(null), added = Object.create(null), order = [];
+  n.chapters.forEach(function (c) { chapters[c.id] = c; });
+  (Array.isArray(saved.order) ? saved.order : []).forEach(function (o) {
+    if (!o || !chapters[o.id] || added[o.id]) return;
+    added[o.id] = true; order.push({ id: o.id, vol: seen[o.vol] ? o.vol : '' });
+  });
+  n.chapters.forEach(function (c) { if (!added[c.id]) order.push({ id: c.id, vol: seen[c.vol] ? c.vol : '' }); });
+  return { vols: vols, order: order };
+}
 
 /* ---------- 日间 / 夜间 ---------- */
 var MODE_KEY = NS + 'mode';
@@ -2279,7 +2357,8 @@ function viewEditNovel(id) {
     var n = isNew ? null : findNovel(id);
     if (!isNew && !n) return notFound('这部作品不存在。', ['#/admin/novels', '回到后台']);
     var cur = { title: n ? n.title : '', genre: n ? n.genre : '', status: n ? n.status : 'serial', synopsis: n ? n.synopsis : '', cover: n ? n.cover : 'dai', tpl: n ? n.tpl : 'thread', author: n ? n.author : '' };
-    var html = '<div class="editor"><div class="ed-head"><a class="back" href="' + (isNew ? '#/admin/novels' : '#/novel/' + enc(n.id)) + '">‹ 返回</a></div>' +
+    var html = '<div class="editor"><div class="ed-head"><a class="back" href="' + (isNew ? '#/admin/novels' : '#/novel/' + enc(n.id)) + '">‹ 返回</a>' +
+      '<span class="ed-status" id="n-draft-status" aria-live="polite"></span></div><div id="n-draft-slot"></div>' +
       '<h1 class="ed-h">' + (isNew ? '新建小说' : '管理作品') + '</h1>' +
       '<div class="novel-form"><div id="nf-cover"></div><div>' +
       '<label class="field"><span>书名</span><input class="input" id="n-title" maxlength="40" autocomplete="off"></label>' +
@@ -2298,6 +2377,7 @@ function viewEditNovel(id) {
       (isNew ? '' : '<div class="row-head"><h2>章节与分卷</h2>' +
         '<a class="btn sm primary" href="#/edit/chapter/' + enc(n.id) + '/new">写新章节</a></div>' +
         '<p class="hint vol-hint">章节多了可以分卷，目录会按卷分组。改完顺序或分卷后，点下方按钮保存。</p>' +
+        '<div id="ch-draft-slot"></div><p class="hint" id="ch-draft-status" aria-live="polite"></p>' +
         '<div id="ch-area"></div>' +
         '<button type="button" class="btn block" id="vol-add">新建分卷</button>' +
         '<div class="ch-save-bar" id="ch-save-bar" hidden><span>章节或分卷有改动，还没保存</span>' +
@@ -2321,16 +2401,31 @@ function viewEditNovel(id) {
           $$('#n-cover button', main).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === cur.cover); });
         };
         drawCover(); drawPick();
-        t.addEventListener('input', drawCover);
-        au.addEventListener('input', drawCover);
+        var infoDraft = mountFormDraft(main, {
+          key: 'novel-info:' + (isNew ? 'new' : n.id), label: '作品信息', slot: '#n-draft-slot', status: '#n-draft-status',
+          read: function () { return { title: t.value, genre: g.value, synopsis: syn.value, author: au.value, status: cur.status, cover: cur.cover, tpl: cur.tpl }; },
+          restore: function (d) {
+            [[t, 'title'], [g, 'genre'], [syn, 'synopsis'], [au, 'author']].forEach(function (pair) {
+              if (typeof d[pair[1]] === 'string') pair[0].value = d[pair[1]];
+            });
+            cur.status = d.status === 'done' ? 'done' : 'serial';
+            if (COVERS[d.cover]) cur.cover = d.cover;
+            if (TEMPLATES[d.tpl]) cur.tpl = d.tpl;
+            drawCover(); drawPick();
+          }
+        });
+        t.addEventListener('input', function () { drawCover(); infoDraft.change(); });
+        au.addEventListener('input', function () { drawCover(); infoDraft.change(); });
+        g.addEventListener('input', infoDraft.change);
+        syn.addEventListener('input', infoDraft.change);
         $('#n-tpl', main).addEventListener('click', function (e) {
-          var b = e.target.closest('[data-v]'); if (!b) return; cur.tpl = b.getAttribute('data-v'); drawCover();
+          var b = e.target.closest('[data-v]'); if (!b) return; cur.tpl = b.getAttribute('data-v'); drawCover(); infoDraft.change();
         });
         $('#n-status', main).addEventListener('click', function (e) {
-          var b = e.target.closest('[data-v]'); if (!b) return; cur.status = b.getAttribute('data-v'); drawPick();
+          var b = e.target.closest('[data-v]'); if (!b) return; cur.status = b.getAttribute('data-v'); drawPick(); infoDraft.change();
         });
         $('#n-cover', main).addEventListener('click', function (e) {
-          var b = e.target.closest('[data-v]'); if (!b) return; cur.cover = b.getAttribute('data-v'); drawPick(); drawCover();
+          var b = e.target.closest('[data-v]'); if (!b) return; cur.cover = b.getAttribute('data-v'); drawPick(); drawCover(); infoDraft.change();
         });
         $('#n-save', main).addEventListener('click', function () {
           var title = t.value.trim();
@@ -2342,7 +2437,7 @@ function viewEditNovel(id) {
             var old = d.novels.find(function (x) { return x.id === nid; });
             if (old) Object.assign(old, info);
             else d.novels.push(Object.assign({ id: nid, created: now, chapters: [] }, info));
-          }, { returnTo: '#/edit/novel/' + enc(nid), toast: isNew ? '已创建作品，开始写第一章吧' : '已保存作品信息', message: (isNew ? '新建小说：' : '更新小说信息：') + title });
+          }, { returnTo: '#/edit/novel/' + enc(nid), onSuccess: infoDraft.accept, toast: isNew ? '已创建作品，开始写第一章吧' : '已保存作品信息', message: (isNew ? '新建小说：' : '更新小说信息：') + title });
         });
 
         var area = $('#ch-area', main);
@@ -2397,12 +2492,18 @@ function viewEditNovel(id) {
           $('#ch-save-bar', main).hidden = !dirty();
         };
         draw();
+        var chapterDraft = mountFormDraft(main, {
+          key: 'novel-plan:' + n.id, label: '章节与分卷调整', slot: '#ch-draft-slot', status: '#ch-draft-status',
+          read: function () { return { vols: stt.vols, order: stt.order, baseVolumes: n.volumes.map(function (v) { return v.id; }) }; },
+          restore: function (d) { stt = restoreChapterPlan(n, d); draw(); }
+        });
         area.addEventListener('input', function (e) {
           var inp = e.target.closest('[data-vname]');
           if (!inp) return;
           var v = stt.vols.find(function (x) { return x.id === inp.getAttribute('data-vname'); });
           if (v) v.title = inp.value;
           $('#ch-save-bar', main).hidden = !dirty();
+          chapterDraft.change();
         });
         area.addEventListener('change', function (e) {
           var sel = e.target.closest('[data-chvol]');
@@ -2413,6 +2514,7 @@ function viewEditNovel(id) {
           item.vol = sel.value;
           stt.order.push(item);
           draw();
+          chapterDraft.change();
         });
         area.addEventListener('click', function (e) {
           var mv = e.target.closest('[data-mv]');
@@ -2422,6 +2524,7 @@ function viewEditNovel(id) {
             while (j >= 0 && j < stt.order.length && stt.order[j].vol !== vol) j += dir;
             if (j >= 0 && j < stt.order.length) { var t = stt.order[i]; stt.order[i] = stt.order[j]; stt.order[j] = t; }
             draw();
+            chapterDraft.change();
             return;
           }
           var vmv = e.target.closest('[data-vmv]');
@@ -2429,6 +2532,7 @@ function viewEditNovel(id) {
             var q = vmv.getAttribute('data-vmv').split(':'), vi = stt.vols.findIndex(function (v) { return v.id === q[0]; }), vj = vi + (+q[1]);
             if (vj >= 0 && vj < stt.vols.length) { var tv = stt.vols[vi]; stt.vols[vi] = stt.vols[vj]; stt.vols[vj] = tv; }
             draw();
+            chapterDraft.change();
             return;
           }
           var vdel = e.target.closest('[data-vdel]');
@@ -2437,6 +2541,7 @@ function viewEditNovel(id) {
             stt.vols = stt.vols.filter(function (v) { return v.id !== vid; });
             stt.order.forEach(function (o) { if (o.vol === vid) o.vol = ''; });
             draw();
+            chapterDraft.change();
             toast('分卷已删除，里面的章节移到了「未分卷」。保存后生效。');
             return;
           }
@@ -2456,11 +2561,12 @@ function viewEditNovel(id) {
         $('#vol-add', main).addEventListener('click', function () {
           stt.vols.push({ id: 'v' + uid(), title: '第' + cnNum(stt.vols.length + 1) + '卷 ' });
           draw();
+          chapterDraft.change();
           var inputs = $$('[data-vname]', area);
           var last = inputs[inputs.length - 1];
           if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
         });
-        $('#ch-reset', main).addEventListener('click', function () { stt = initial(); draw(); });
+        $('#ch-reset', main).addEventListener('click', function () { stt = initial(); draw(); chapterDraft.accept(); });
         $('#ch-save', main).addEventListener('click', function () {
           regroup();
           commit(function (d) {
@@ -2474,7 +2580,7 @@ function viewEditNovel(id) {
             }).filter(Boolean).concat(nn.chapters.filter(function (c) {
               return !stt.order.some(function (o) { return o.id === c.id; });
             }));
-          }, { returnTo: '#/edit/novel/' + enc(n.id), toast: '已保存章节和分卷', message: '调整章节与分卷' });
+          }, { returnTo: '#/edit/novel/' + enc(n.id), onSuccess: chapterDraft.accept, toast: '已保存章节和分卷', message: '调整章节与分卷' });
         });
       }
     };
@@ -2512,6 +2618,8 @@ function resolveView(p) {
 }
 function render(keepScroll) {
   cleanups.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+  formDrafts = [];
+  renderedHash = location.hash;
   var openLb = doc.querySelector('.lightbox');
   if (openLb && openLb._close) openLb._close();
   var y = window.scrollY;
@@ -2629,7 +2737,22 @@ function boot() {
     }
     if (e.target.closest('#mode-btn')) toggleMode();
   });
-  window.addEventListener('hashchange', function () { render(); });
+  window.addEventListener('hashchange', function () {
+    if (location.hash !== renderedHash && hasUnsavedForms()) {
+      flushFormDrafts();
+      var stored = formDrafts.every(function (d) { return !d.dirty() || d.saved(); });
+      var message = '还有改动尚未保存到仓库。' + (stored ? '这些改动已暂存在这台设备上，离开后可以恢复。' : '部分改动无法暂存，离开可能丢失。建议先取消并手动保存。');
+      if (!window.confirm(message + '确定离开？')) {
+        history.replaceState(null, '', renderedHash); return;
+      }
+    }
+    render();
+  });
+  window.addEventListener('beforeunload', function (e) {
+    flushFormDrafts();
+    if (hasUnsavedForms()) { e.preventDefault(); e.returnValue = ''; }
+  });
+  doc.addEventListener('visibilitychange', function () { if (doc.visibilityState === 'hidden') flushFormDrafts(); });
   window.addEventListener('pagehide', function () { cleanups.forEach(function (f) { try { f(); } catch (e) {} }); });
 
   applyStyle(DATA.site.style);
