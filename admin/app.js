@@ -1519,10 +1519,11 @@ function buildZipWith(JSZip, imgBytes, model) {
     zip.file('图片/' + id + '.' + b.ext, b.bytes);
   });
   var fixImgs = function (md) {
-    return md.replace(/\]\(img:([a-z0-9]+)\)/gi, function (m, id) { return '](../图片/' + id + '.' + (exts[id] || 'jpg') + ')'; });
+    return md.replace(/\]\(img:([a-z0-9_-]+)\)/gi, function (m, id) { return '](../图片/' + id + '.' + (exts[id] || 'jpg') + ')'; });
   };
   var y = function (s) { return JSON.stringify(String(s == null ? '' : s)); };
-  sortedPosts().forEach(function (p) {
+  // 导出已转换图片引用的数据，按发布时间排序。
+  d.posts.slice().sort(function (a, b) { return a.created < b.created ? 1 : a.created > b.created ? -1 : 0; }).forEach(function (p) {
     var front = '---\ntitle: ' + y(p.title) + '\ndate: ' + p.created + '\ntags: ' + JSON.stringify(p.tags) +
       (p.summary ? '\nsummary: ' + y(p.summary) : '') + '\n---\n\n';
     zip.file(unique('文章/' + ymd(p.created) + ' ' + safeName(p.title) + '.md'), front + fixImgs(p.content) + '\n');
