@@ -740,11 +740,53 @@ function saveDraft(key, data) {
 }
 function dropDraft(key) { LS.del(NS + 'draft:' + key); }
 
+// 每次打开页面都有独立编号；不使用会被“复制标签页”一起复制的 sessionStorage。
+var draftPageId = window.crypto.randomUUID();
+function draftScope() {
+  var repo = GH ? GH.repo : CFG.repo, branch = GH ? GH.branch : CFG.branch;
+  return enc(repo || '') + ':' + enc(branch || '');
+}
+function draftKey(logical) { return 'v2:' + draftScope() + ':' + enc(logical) + ':' + draftPageId; }
+function draftVersions(logical) {
+  var prefix = 'v2:' + draftScope() + ':' + enc(logical) + ':';
+  var keys = LS.keys(NS + 'draft:' + prefix).map(function (k) { return k.slice((NS + 'draft:').length); });
+  // 旧版正文草稿没有仓库标记，只在本站默认仓库/分支下提供恢复，保留原数据。
+  var repo = GH || CFG;
+  if (logical.indexOf('form:') === 0) keys.push('form:' + repo.repo + ':' + repo.branch + ':' + logical.slice(5));
+  else if (repo.repo === CFG.repo && repo.branch === CFG.branch) keys.push(logical);
+  return keys.map(function (key) { return { key: key, draft: loadDraft(key) }; })
+    .filter(function (v) { return v.draft; })
+    .sort(function (a, b) { return b.draft.t - a.draft.t; });
+}
+function mountDraftChoices(slot, logical, restore) {
+  var versions = draftVersions(logical);
+  if (!versions.length) return;
+  slot.innerHTML = '<div class="draft-banner draft-choices"><div>本机有 ' + versions.length + ' 份暂存。恢复会复制到当前页面，原暂存仍保留。</div>' +
+    versions.map(function (v, i) {
+      var title = v.draft.data.title || (v.draft.data.content || '').slice(0, 30) || '未命名暂存';
+      return '<div><span>' + escHtml(title) + ' · ' + escHtml(fmtTime(v.draft.t)) + '</span> ' +
+        '<button type="button" class="btn sm primary" data-draft-restore="' + i + '">恢复这份</button> ' +
+        '<button type="button" class="btn sm ghost" data-draft-discard="' + i + '">丢弃这份</button></div>';
+    }).join('') + '</div>';
+  slot.onclick = function (e) {
+    var b = e.target.closest('[data-draft-restore], [data-draft-discard]');
+    if (!b) return;
+    var restoring = b.hasAttribute('data-draft-restore');
+    var v = versions[Number(b.getAttribute(restoring ? 'data-draft-restore' : 'data-draft-discard'))];
+    // 读取最新版本，避免恢复选择框出现后另一页继续输入的旧副本。
+    var current = loadDraft(v.key);
+    if (restoring && current) { restore(clone(current.data)); slot.innerHTML = ''; }
+    else if (!restoring) { dropDraft(v.key); mountDraftChoices(slot, logical, restore); }
+    else { slot.innerHTML = ''; mountDraftChoices(slot, logical, restore); }
+    if (!draftVersions(logical).length) slot.innerHTML = '';
+  };
+}
+
 /* 作品信息与分卷各自暂存在本机，只有手动保存才提交到仓库。 */
 function flushFormDrafts() { formDrafts.forEach(function (d) { d.flush(); }); }
 function hasUnsavedForms() { return formDrafts.some(function (d) { return d.dirty(); }); }
 function mountFormDraft(main, cfg) {
-  var key = 'form:' + (GH ? GH.repo + ':' + GH.branch : CFG.repo + ':' + CFG.branch) + ':' + cfg.key;
+  var logical = 'form:' + cfg.key, key = draftKey(logical);
   var baseline = JSON.stringify(cfg.read()), touched = false;
   var slot = $(cfg.slot, main), status = $(cfg.status, main);
   var dirty = function () { return JSON.stringify(cfg.read()) !== baseline; };
@@ -756,20 +798,9 @@ function mountFormDraft(main, cfg) {
       : '这台设备无法暂存，请及时手动保存';
   };
   var save = debounce(persist, 700);
-  var draft = loadDraft(key);
-  if (draft && JSON.stringify(draft.data) !== baseline) {
-    slot.innerHTML = '<div class="draft-banner"><span>这台设备上有一份 ' + fmtTime(draft.t) + ' 未保存的' + escHtml(cfg.label) + '。</span>' +
-      '<button type="button" class="btn sm primary" data-form-draft="restore">恢复暂存</button>' +
-      '<button type="button" class="btn sm ghost" data-form-draft="discard">丢弃</button></div>';
-    slot.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-form-draft]');
-      if (!b) return;
-      if (b.getAttribute('data-form-draft') === 'restore') {
-        cfg.restore(clone(draft.data)); touched = true; persist();
-      } else { dropDraft(key); status.textContent = '已丢弃本机暂存'; }
-      slot.innerHTML = '';
-    });
-  } else if (draft) dropDraft(key);
+  mountDraftChoices(slot, logical, function (data) {
+    cfg.restore(data); touched = true; persist();
+  });
   var tracker = {
     dirty: dirty,
     saved: function () {
@@ -2181,27 +2212,11 @@ function mountEditor(main, cfg) {
   });
   cleanups.push(save.flush);
 
-  var draft = loadDraft(cfg.key);
-  if (draft && !same(draft.data)) {
-    slot.innerHTML = '<div class="draft-banner"><span>这台设备上有一份 ' + fmtTime(draft.t) + ' 未发布的草稿。</span>' +
-      '<button type="button" class="btn sm primary" data-d="r">恢复草稿</button>' +
-      '<button type="button" class="btn sm ghost" data-d="x">丢弃</button></div>';
-    slot.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-d]');
-      if (!b) return;
-      if (b.getAttribute('data-d') === 'r') {
-        keys.forEach(function (k) { if (typeof draft.data[k] === 'string') st[k] = draft.data[k]; });
-        st.images = draft.data.images || {};
-        fill();
-        status.textContent = '已恢复草稿';
-      } else {
-        dropDraft(cfg.key);
-      }
-      slot.innerHTML = '';
-    });
-  } else if (draft) {
-    dropDraft(cfg.key);
-  }
+  mountDraftChoices(slot, cfg.logical, function (data) {
+    keys.forEach(function (k) { if (typeof data[k] === 'string') st[k] = data[k]; });
+    st.images = data.images || {};
+    fill(); save(); save.flush();
+  });
 
   var onInput = function () {
     keys.forEach(function (k) { st[k] = getV(els[k]); });
@@ -2316,9 +2331,9 @@ function viewEditPost(id) {
     return {
       html: html, nav: 'admin', bare: true, title: isNew ? '写新博客' : '编辑文章',
       mount: function (main) {
-        var key = 'post:' + (isNew ? 'new' : post.id);
+        var logical = 'post:' + (isNew ? 'new' : post.id), key = draftKey(logical);
         mountEditor(main, {
-          key: key,
+          key: key, logical: logical,
           base: { title: post ? post.title : '', tags: post ? post.tags.join('，') : '', summary: post ? post.summary : '',
             series: post ? post.series : '', pinned: post && post.pinned ? '1' : '', content: post ? post.content : '' },
           fields: { title: '#f-title', tags: '#f-tags', summary: '#f-sum', series: '#f-series', pinned: '#f-pin', content: '#f-body' },
@@ -2368,9 +2383,9 @@ function viewEditChapter(nid, cid) {
     return {
       html: html, nav: 'admin', bare: true, title: isNew ? '写新章节' : '编辑章节',
       mount: function (main) {
-        var key = 'ch:' + n.id + ':' + (isNew ? 'new' : c.id);
+        var logical = 'ch:' + n.id + ':' + (isNew ? 'new' : c.id), key = draftKey(logical);
         mountEditor(main, {
-          key: key,
+          key: key, logical: logical,
           base: { title: c ? c.title : '第' + cnNum(n.chapters.length + 1) + '章 ', content: c ? c.content : '',
             vol: c ? c.vol : (n.volumes.length ? n.volumes[n.volumes.length - 1].id : '') },
           fields: n.volumes.length ? { title: '#f-title', vol: '#f-vol', content: '#f-body' } : { title: '#f-title', content: '#f-body' },

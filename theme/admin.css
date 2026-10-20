@@ -14,3 +14,7 @@
 .token-help{margin-top:22px;padding:14px;border:1px solid var(--line);border-radius:var(--radius);font-family:var(--font-ui);font-size:14px;line-height:1.7;color:var(--fg2)}
 .token-help p{margin:0 0 12px}
 .token-help b{color:var(--fg)}
+
+.draft-choices{display:block}
+.draft-choices>div+div{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
+.draft-choices span{overflow-wrap:anywhere}
