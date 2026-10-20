@@ -1,4 +1,6 @@
 /* ---------- 手机后台补充样式 ---------- */
+.ed-head>.back{flex-shrink:0;white-space:nowrap}
+.ed-status.save-failed{color:var(--danger)}
 .draft-badge{display:inline-block;margin-right:8px;padding:0 6px;border:1px dashed var(--muted);border-radius:4px;color:var(--muted);font-family:var(--font-ui);font-size:12px;font-weight:600;line-height:1.6;vertical-align:2px}
 .ed-btns{display:flex;gap:8px}
 .page-head .link-btn{font-size:14px}

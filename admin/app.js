@@ -735,9 +735,8 @@ function loadDraft(key) {
   try { var d = JSON.parse(raw); return d && d.data ? d : null; } catch (e) { return null; }
 }
 function saveDraft(key, data) {
-  if (LS.set(NS + 'draft:' + key, JSON.stringify({ t: Date.now(), data: data }))) return true;
-  var lite = Object.assign({}, data, { images: {} });
-  return LS.set(NS + 'draft:' + key, JSON.stringify({ t: Date.now(), data: lite }));
+  // 完整写入失败就保留上一份草稿，不能删掉图片后仍返回保存成功。
+  return LS.set(NS + 'draft:' + key, JSON.stringify({ t: Date.now(), data: data }));
 }
 function dropDraft(key) { LS.del(NS + 'draft:' + key); }
 
@@ -2163,9 +2162,23 @@ function mountEditor(main, cfg) {
   fill();
 
   var save = debounce(function () {
-    if (same(st) && !Object.keys(st.images).length) { dropDraft(cfg.key); status.textContent = ''; return; }
-    status.textContent = saveDraft(cfg.key, st) ? '草稿已存在本机 ' + fmtTime(Date.now()).replace('今天 ', '') : '这台设备无法保存草稿';
+    if (same(st) && !Object.keys(st.images).length) { dropDraft(cfg.key); status.textContent = ''; status.classList.remove('save-failed'); return; }
+    var saved = saveDraft(cfg.key, st);
+    status.classList.toggle('save-failed', !saved);
+    status.textContent = saved
+      ? '草稿已存在本机 ' + fmtTime(Date.now()).replace('今天 ', '')
+      : '草稿未能完整保存到本机，可能是存储空间不足。请保持此页打开，手动保存到仓库后再离开。';
   }, 700);
+  var draftMatches = function () {
+    var saved = loadDraft(cfg.key);
+    return !!saved && JSON.stringify(saved.data) === JSON.stringify(st);
+  };
+  // 正文已完整暂存时可以直接离开；暂存失败时接入页面离开保护。
+  formDrafts.push({
+    flush: save.flush,
+    dirty: function () { return (!same(st) || Object.keys(st.images).length > 0) && !draftMatches(); },
+    saved: draftMatches
+  });
   cleanups.push(save.flush);
 
   var draft = loadDraft(cfg.key);
@@ -2777,8 +2790,8 @@ function boot() {
     if (e.target.closest('#mode-btn')) toggleMode();
   });
   window.addEventListener('hashchange', function () {
+    if (location.hash !== renderedHash) flushFormDrafts();
     if (location.hash !== renderedHash && hasUnsavedForms()) {
-      flushFormDrafts();
       var stored = formDrafts.every(function (d) { return !d.dirty() || d.saved(); });
       var message = '还有改动尚未保存到仓库。' + (stored ? '这些改动已暂存在这台设备上，离开后可以恢复。' : '部分改动无法暂存，离开可能丢失。建议先取消并手动保存。');
       if (!window.confirm(message + '确定离开？')) {
