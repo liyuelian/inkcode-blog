@@ -5,4 +5,27 @@ a.mode-btn{color:var(--fg2)}
 .foot-r a:hover{color:var(--accent)}
 .s-type{display:inline-block;margin-right:8px;padding:0 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent);font-family:var(--font-ui);font-size:12px;font-weight:600;line-height:1.7;vertical-align:3px}
 .pi-sum mark{background:var(--sel);color:inherit;border-radius:2px;padding:0 1px}
+.reader-nav{position:relative}
+.style-switch{flex:none}
+.style-switch summary{list-style:none}
+.style-switch summary::-webkit-details-marker{display:none}
+.style-switch[open] summary{color:var(--accent);background:var(--accent-soft)}
+.style-popover{position:absolute;top:calc(100% + 8px);right:20px;z-index:60;width:min(290px,calc(100vw - 40px));max-height:calc(100vh - 128px);max-height:calc(100dvh - 128px - env(safe-area-inset-top,0px));overflow-y:auto;overscroll-behavior:contain;padding:18px;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 14px 34px -20px var(--shadow);font-family:var(--font-ui)}
+.style-popover fieldset{margin:0;padding:0;border:0;min-width:0}
+.style-popover fieldset+fieldset{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.style-popover legend{padding:0;margin-bottom:10px;font-size:15px;font-weight:600}
+.appearance-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.mode-option{position:relative;display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 3px;border:1px solid var(--line);border-radius:var(--radius);font-size:12px;cursor:pointer}
+.mode-option:hover,.mode-option.selected{background:var(--accent-soft);border-color:var(--accent)}
+.mode-option.selected{color:var(--accent)}
+.mode-option:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.mode-option input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.mode-option>span{display:flex;align-items:center;pointer-events:none}
+.mode-option svg{width:18px;height:18px}
+.style-option{display:flex;align-items:center;gap:12px;padding:10px;border-radius:var(--radius);cursor:pointer}
+.style-option:hover,.style-option.selected{background:var(--accent-soft)}
+.style-option input{margin:0;flex:none;accent-color:var(--accent)}
+.style-option strong{display:block;font-size:14px;font-weight:500;line-height:1.5}
+.style-option small{display:block;font-size:12px;color:var(--muted);line-height:1.7}
+.style-popover p{margin:12px 0 0;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
 @media (max-width:380px){.nav-links a{padding:8px 7px}.nav-in{gap:4px}}

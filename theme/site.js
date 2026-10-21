@@ -11,8 +11,8 @@ function store() {
   try { s = window.localStorage; s.setItem('__t', '1'); s.removeItem('__t'); } catch (e) { s = null; }
   return {
     get: function (k) { try { return s ? s.getItem(k) : null; } catch (e) { return null; } },
-    set: function (k, v) { try { if (s) s.setItem(k, v); } catch (e) {} },
-    del: function (k) { try { if (s) s.removeItem(k); } catch (e) {} }
+    set: function (k, v) { try { if (s) { s.setItem(k, v); return true; } } catch (e) {} return false; },
+    del: function (k) { try { if (s) { s.removeItem(k); return true; } } catch (e) {} return false; }
   };
 }
 var LS = store();
@@ -45,8 +45,65 @@ function toast(msg) {
   clearTimeout(t._h);
   t._h = setTimeout(function () { t.classList.remove('show'); }, Math.max(2400, msg.length * 110));
 }
-var SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>';
-var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7Z"/></svg>';
+
+/* ---------- 访客主题：只保存本浏览器的选择，不改网站发布设置 ---------- */
+var STYLE_NAMES = { paper: '书卷纸墨', minimal: '极简留白', terminal: '暗夜终端' };
+var APPEARANCE = (function () {
+  try { return JSON.parse(doc.getElementById('appearance-config').textContent); } catch (e) { return {}; }
+})();
+var STYLE_KEY = APPEARANCE.storageKey || NS + 'style:' + (BASE || '/');
+function isStyle(k) { return Object.prototype.hasOwnProperty.call(STYLE_NAMES, k); }
+function defaultStyle() {
+  var fallback = root.getAttribute('data-default-style') || APPEARANCE.defaultStyle;
+  return isStyle(fallback) ? fallback : 'paper';
+}
+function preferredStyle() {
+  var saved = LS.get(STYLE_KEY);
+  return isStyle(saved) ? saved : defaultStyle();
+}
+function applyVisitorStyle(choice) {
+  var style = isStyle(choice) ? choice : defaultStyle();
+  root.setAttribute('data-style', style);
+  var href = APPEARANCE.fonts && APPEARANCE.fonts[style];
+  if (href) {
+    var link = doc.getElementById('font-link');
+    if (!link) { link = doc.createElement('link'); link.id = 'font-link'; link.rel = 'stylesheet'; doc.head.appendChild(link); }
+    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+  }
+  $$('#style-switch input[name="visitor-style"]').forEach(function (input) {
+    input.checked = input.value === style;
+    input.closest('label').classList.toggle('selected', input.checked);
+  });
+  // 字体、间距及导航高度变化后，重新计算阅读进度和目录位置。
+  window.dispatchEvent(new Event('resize'));
+  return style;
+}
+function chooseVisitorStyle(choice) {
+  if (!isStyle(choice)) return;
+  var saved = LS.set(STYLE_KEY, choice);
+  var style = applyVisitorStyle(choice);
+  toast('已切换为' + STYLE_NAMES[style] +
+    (saved ? '。' : '。当前浏览器无法记住选择。'));
+}
+function initAppearance() {
+  applyVisitorStyle(preferredStyle());
+  var picker = doc.getElementById('style-switch');
+  if (picker) {
+    picker.hidden = false;
+    picker.addEventListener('change', function (e) {
+      if (e.target.matches('input[name="visitor-style"]')) chooseVisitorStyle(e.target.value);
+      if (e.target.matches('input[name="visitor-mode"]')) chooseMode(e.target.value);
+    });
+    doc.addEventListener('click', function (e) { if (!picker.contains(e.target)) picker.open = false; });
+    doc.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && picker.open) { e.preventDefault(); picker.open = false; $('summary', picker).focus(); }
+    });
+  }
+  window.addEventListener('storage', function (e) {
+    if (e.key === STYLE_KEY || e.key === null) applyVisitorStyle(preferredStyle());
+    if (e.key === MODE_KEY || e.key === null) applyMode(preferredMode());
+  });
+}
 
 var MODE_KEY = NS + 'mode';
 function systemMode() {
@@ -54,46 +111,32 @@ function systemMode() {
   if (t === 'dark' || t === 'light') return t;
   return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
-function effectiveMode() {
-  var m = root.getAttribute('data-mode');
-  return m === 'dark' || m === 'light' ? m : systemMode();
+function preferredMode() {
+  var mode = LS.get(MODE_KEY);
+  var current = root.getAttribute('data-mode');
+  return mode === 'light' || mode === 'dark' ? mode : (current === 'light' || current === 'dark' ? current : systemMode());
 }
 function applyMode(m) {
-  if (m === 'dark' || m === 'light') root.setAttribute('data-mode', m);
-  else root.removeAttribute('data-mode');
+  root.setAttribute('data-mode', m === 'dark' || m === 'light' ? m : preferredMode());
+  updateModeOptions();
 }
-function modeBtnHtml() {
-  var dark = effectiveMode() === 'dark';
-  return '<button type="button" class="mode-btn" id="mode-btn" aria-label="' + (dark ? '切换到日间模式' : '切换到夜间模式') + '" title="' +
-    (dark ? '日间模式' : '夜间模式') + '">' + (dark ? SUN : MOON) + '</button>';
-}
-function updateModeBtn() {
-  var b = doc.getElementById('mode-btn');
-  if (b) b.outerHTML = modeBtnHtml();
+function updateModeOptions() {
+  var mode = root.getAttribute('data-mode');
+  $$('#style-switch input[name="visitor-mode"]').forEach(function (input) {
+    input.checked = input.value === mode;
+    input.closest('label').classList.toggle('selected', input.checked);
+  });
 }
 var modeAnimTimer = null;
-function toggleMode() {
-  var next = effectiveMode() === 'dark' ? 'light' : 'dark';
+function chooseMode(next) {
+  if (next !== 'light' && next !== 'dark') return;
   root.classList.add('mode-anim');
   clearTimeout(modeAnimTimer);
   modeAnimTimer = setTimeout(function () { root.classList.remove('mode-anim'); }, 500);
-  /* 和系统一致时就不再记住，之后继续跟随系统 */
-  if (next === systemMode()) { applyMode(null); LS.del(MODE_KEY); }
-  else { applyMode(next); LS.set(MODE_KEY, next); }
-  updateModeBtn();
-  var b = doc.getElementById('mode-btn');
-  if (b) b.focus();
-}
-function watchSystemMode() {
-  var sync = function () {
-    if (root.getAttribute('data-mode') && root.getAttribute('data-mode') === systemMode()) { applyMode(null); LS.del(MODE_KEY); }
-    updateModeBtn();
-  };
-  if (window.matchMedia) {
-    var mq = window.matchMedia('(prefers-color-scheme: dark)');
-    if (mq.addEventListener) mq.addEventListener('change', sync); else if (mq.addListener) mq.addListener(sync);
-  }
-  if (window.MutationObserver) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+  var saved = LS.set(MODE_KEY, next);
+  applyMode(next);
+  toast('已切换到' + (next === 'dark' ? '夜间' : '日间') + '模式' +
+    (saved ? '。' : '。当前浏览器无法记住选择。'));
 }
 
 
@@ -653,6 +696,7 @@ function redirectOldHash() {
 
 /* ---------- 启动 ---------- */
 function init() {
+  initAppearance();
   doc.addEventListener('click', function (e) {
     var t = e.target;
     var cp = t.closest('.code-copy');
@@ -674,17 +718,15 @@ function init() {
       return;
     }
     if (t.closest('[data-top]')) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    if (t.closest('#mode-btn')) { toggleMode(); return; }
     var im = t.closest('.prose img');
     if (im && !im.closest('a')) {
       var imgs = $$('img', im.closest('.prose')).filter(function (x) { return !x.closest('a'); });
       openLightbox(imgs.map(function (x) { return { src: x.currentSrc || x.src, alt: x.getAttribute('alt') || '' }; }), imgs.indexOf(im));
     }
   });
-  var saved = LS.get(MODE_KEY);
-  if (saved === 'dark' || saved === 'light') applyMode(saved === systemMode() ? null : saved);
-  watchSystemMode();
-  updateModeBtn();
+  var mode = preferredMode();
+  applyMode(mode);
+  if (LS.get(MODE_KEY) !== mode) LS.set(MODE_KEY, mode);
   var page = body.getAttribute('data-page');
   if (page === 'home') redirectOldHash();
   if (page === 'post') setupReading($('.article'), { toc: true });

@@ -155,7 +155,13 @@ const STYLE_FONTS = {
   terminal: 'family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@700;900'
 };
 const fontBase = typeof site.fontBase === 'string' ? site.fontBase : 'https://fonts.googleapis.com/css2';
-const fontHref = fontBase ? fontBase + (fontBase.includes('?') ? '&' : '?') + STYLE_FONTS[site.style] + '&display=swap' : '';
+const fontHrefs = Object.fromEntries(Object.entries(STYLE_FONTS).map(([key, fonts]) =>
+  [key, fontBase ? fontBase + (fontBase.includes('?') ? '&' : '?') + fonts + '&display=swap' : '']));
+const fontHref = fontHrefs[site.style];
+const appearanceConfig = JSON.stringify({ defaultStyle: site.style, storageKey: 'site:style:' + (BASE || '/'), fonts: fontHrefs }).replace(/</g, '\\u003c');
+// 在样式表载入前应用访客偏好，跨页或刷新时也不先闪回作者的默认主题。
+const appearanceBoot = '(function(){var a=JSON.parse(document.getElementById("appearance-config").textContent),s=a.defaultStyle;try{var p=localStorage.getItem(a.storageKey);if(p==="paper"||p==="minimal"||p==="terminal")s=p}catch(e){}document.documentElement.setAttribute("data-style",s);var l=document.getElementById("font-link");if(l&&a.fonts[s])l.setAttribute("href",a.fonts[s])})();';
+const modeBoot = '(function(){var r=document.documentElement,m;try{m=localStorage.getItem("site:mode")}catch(e){}if(m!=="dark"&&m!=="light"){m=r.getAttribute("data-theme");if(m!=="dark"&&m!=="light")m=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";try{localStorage.setItem("site:mode",m)}catch(e){}}r.setAttribute("data-mode",m)})();';
 const css = tokens + fs.readFileSync(path.join(ROOT, 'theme', 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'theme', 'extra.css'), 'utf8');
 const siteJs = fs.readFileSync(path.join(ROOT, 'theme', 'site.js'), 'utf8');
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 10);
@@ -165,13 +171,27 @@ const JS_URL = u('/assets/site.js?v=' + hash(siteJs));
 /* ---------- 页面外壳 ---------- */
 const ICON = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%96%8B%3C/text%3E%3C/svg%3E';
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+const STYLE_NAMES = { paper: '书卷纸墨', minimal: '极简留白', terminal: '暗夜终端' };
+const PALETTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1a2.5 2.5 0 0 0 1.8-4.2 1.4 1.4 0 0 1 1-2.4H18A3 3 0 0 0 21 11c0-4.4-4-8-9-8Z"/><path d="M7.5 11h.01M9 7.5h.01M13 6.5h.01M16.5 9h.01" stroke-width="3"/></svg>';
+const SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>';
 const MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7Z"/></svg>';
+function appearancePicker() {
+  const choices = [['paper', STYLE_NAMES.paper, '纸页与钢笔墨水'],
+    ['minimal', STYLE_NAMES.minimal, '大字号、留白与蓝色'], ['terminal', STYLE_NAMES.terminal, '等宽细节与琥珀色']];
+  const modes = [['light', '日间', SUN], ['dark', '夜间', MOON]];
+  return '<details class="style-switch" id="style-switch" hidden><summary class="mode-btn" aria-label="外观设置" title="外观设置">' + PALETTE + '</summary>' +
+    '<div class="style-popover"><fieldset><legend>日夜模式</legend><div class="appearance-modes">' + modes.map(([value, name, content]) =>
+      '<label class="mode-option" title="' + name + '"><input type="radio" name="visitor-mode" value="' + value + '" aria-label="' + name + '"' + (value === 'light' ? ' checked' : '') + '><span>' + content + '</span></label>').join('') +
+    '</div></fieldset><fieldset><legend>页面风格</legend>' + choices.map(([value, name, desc]) =>
+      '<label class="style-option"><input type="radio" name="visitor-style" value="' + value + '" aria-label="' + name + '"' + (value === site.style ? ' checked' : '') + '>' +
+      '<span><strong>' + name + '</strong><small>' + desc + '</small></span></label>').join('') + '</fieldset><p>仅在当前浏览器生效</p></div></details>';
+}
 function layout(o) {
   const title = o.title ? o.title + ' - ' + site.name : site.name;
   const desc = o.desc || site.tagline || '';
   const nav = [['blog', '博客', '/blog/'], ['novels', '小说', '/novels/'], ['archive', '归档', '/archive/']].map(([k, label, p]) =>
     '<a href="' + u(p) + '"' + (k === o.nav ? ' class="on" aria-current="page"' : '') + '>' + label + '</a>').join('');
-  return '<!doctype html>\n<html lang="zh-CN" data-style="' + site.style + '">\n<head>\n<meta charset="utf-8">\n' +
+  return '<!doctype html>\n<html lang="zh-CN" data-style="' + site.style + '" data-default-style="' + site.style + '">\n<head>\n<meta charset="utf-8">\n' +
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n' +
     '<title>' + esc(title) + '</title>\n' +
     (desc ? '<meta name="description" content="' + esc(desc) + '">\n' : '') +
@@ -182,15 +202,16 @@ function layout(o) {
     (o.image ? '<meta property="og:image" content="' + esc(o.image) + '">\n<meta name="twitter:card" content="summary_large_image">\n' : '<meta name="twitter:card" content="summary">\n') +
     '<link rel="alternate" type="application/rss+xml" title="' + esc(site.name) + '" href="' + u('/feed.xml') + '">\n' +
     '<link rel="icon" href="' + ICON + '">\n' +
-    '<script>try{var m=localStorage.getItem("site:mode");if(m==="dark"||m==="light")document.documentElement.setAttribute("data-mode",m)}catch(e){}</script>\n' +
-    (fontHref ? '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link rel="stylesheet" href="' + esc(fontHref) + '" media="print" onload="this.media=\'all\'">\n' : '') +
+    '<script>' + modeBoot + '</script>\n' +
+    (fontHref ? '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link id="font-link" rel="stylesheet" href="' + esc(fontHref) + '" media="print" onload="this.media=\'all\'">\n' : '') +
+    '<script type="application/json" id="appearance-config">' + appearanceConfig + '</script>\n<script>' + appearanceBoot + '</script>\n' +
     '<link rel="stylesheet" href="' + CSS_URL + '">\n' +
     '<script defer src="' + JS_URL + '"></script>\n' +
     '</head>\n<body data-page="' + (o.page || '') + '" data-base="' + esc(BASE) + '"' + (o.attrs || '') + '>\n' +
-    '<header class="nav"><div class="nav-in"><a class="brand" href="' + u('/') + '"><span class="brand-name">' + esc(site.name) + '</span></a>' +
+    '<header class="nav"><div class="nav-in reader-nav"><a class="brand" href="' + u('/') + '"><span class="brand-name">' + esc(site.name) + '</span></a>' +
     '<nav class="nav-links" aria-label="主导航">' + nav + '</nav>' +
     '<a class="mode-btn" href="' + u('/search/') + '" aria-label="搜索">' + SEARCH_ICON + '</a>' +
-    '<button type="button" class="mode-btn" id="mode-btn" aria-label="切换日间或夜间模式">' + MOON + '</button></div>' +
+    appearancePicker() + '</div>' +
     (o.progress ? '<div class="read-progress" id="read-progress" aria-hidden="true"></div>' : '') + '</header>\n' +
     '<main class="main" id="main">' + o.body + '</main>\n' +
     '<footer class="foot"><span>© ' + NOW.getFullYear() + ' ' + esc(site.name) + '</span><span class="foot-r">' +

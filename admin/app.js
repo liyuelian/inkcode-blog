@@ -10,7 +10,6 @@ var STYLE_META = {
   terminal: { name: '暗夜终端', desc: '等宽字与琥珀色光标', sample: '$ echo "hello"',
               fonts: 'family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@700;900' }
 };
-var STYLE_KEYS = ['paper', 'minimal', 'terminal'];
 
 /* 构建时注入的配置：repo 仓库、branch 分支、siteUrl 网站地址、base 网站路径前缀 */
 var CFG = window.SITE_CONFIG || {};
@@ -428,16 +427,6 @@ function applyStyle(k) {
     doc.head.appendChild(link);
   }
   if (link.getAttribute('href') !== href) link.setAttribute('href', href);
-}
-function loadAllFonts() {
-  STYLE_KEYS.forEach(function (k) {
-    var id = 'font-all-' + k;
-    if (doc.getElementById(id)) return;
-    var l = doc.createElement('link');
-    if (!fontHref(k)) return;
-    l.id = id; l.rel = 'stylesheet'; l.href = fontHref(k);
-    doc.head.appendChild(l);
-  });
 }
 
 /* ---------- 提示、弹窗、发布中 ---------- */
@@ -2133,7 +2122,7 @@ function viewAdmin(tab, page) {
       html += r.html;
       mount = r.mount;
     }
-    return { html: html, nav: 'admin', title: '写作', mount: mount, keepStyle: tab === 'settings' };
+    return { html: html, nav: 'admin', title: '写作', mount: mount };
   });
 }
 
@@ -2148,34 +2137,16 @@ function settingsTab() {
     '<small class="hint">每行一个，格式：名称 | 网址</small></label>' +
     '<label class="field"><span>印章文字</span><input class="input" id="s-seal" maxlength="2" autocomplete="off">' +
     '<small class="hint">1 到 2 个字，盖在小说封面的印章上。留空则取网站名称的前两个字。</small></label>' +
-    '<div class="field"><span>风格</span><div class="style-grid">' + STYLE_KEYS.map(function (k) {
-      var m = STYLE_META[k];
-      return '<button type="button" class="style-card' + (k === s.style ? ' on' : '') + '" data-pick="' + k + '" aria-pressed="' + (k === s.style) + '">' +
-        '<span class="sc-prev" data-style="' + k + '"><b>' + escHtml(s.name) + '</b><i>' + escHtml(m.sample) + '</i><em></em></span>' +
-        '<span class="sc-name"><strong>' + m.name + '</strong><small>' + m.desc + '</small></span></button>';
-    }).join('') + '</div><small class="hint">点一下即可预览整个网站的效果。保存后，访客看到的就是这个风格。</small></div>' +
     '<div class="ed-bar"><span class="ed-count">改动保存后立即上线</span><button type="button" class="btn primary" id="s-save">保存并发布</button></div></div>';
   return {
     html: html,
     mount: function (main) {
-      loadAllFonts();
-      var picked = s.style;
       $('#s-name', main).value = s.name;
       $('#s-tag', main).value = s.tagline;
       $('#s-bio', main).value = s.bio;
       $('#s-links', main).value = linksText;
       $('#s-seal', main).value = s.seal;
       $('#s-seal', main).placeholder = Array.from(s.name).slice(0, 2).join('');
-      main.addEventListener('click', function (e) {
-        var b = e.target.closest('[data-pick]');
-        if (!b) return;
-        picked = b.getAttribute('data-pick');
-        $$('[data-pick]', main).forEach(function (x) {
-          x.classList.toggle('on', x === b);
-          x.setAttribute('aria-pressed', String(x === b));
-        });
-        applyStyle(picked);
-      });
       $('#s-save', main).addEventListener('click', function () {
         var name = $('#s-name', main).value.trim();
         if (!name) { toast('网站名称不能为空。'); $('#s-name', main).focus(); return; }
@@ -2188,7 +2159,7 @@ function settingsTab() {
         commit(function (d) {
           d.site = Object.assign({}, d.site, {
             name: name, tagline: $('#s-tag', main).value.trim(), bio: $('#s-bio', main).value.trim(),
-            links: links, seal: $('#s-seal', main).value.trim(), style: picked
+            links: links, seal: $('#s-seal', main).value.trim()
           });
         }, { returnTo: '#/admin/settings', toast: '已保存并提交', message: '更新网站设置' });
       });
@@ -2794,7 +2765,7 @@ function render(keepScroll) {
   if (openLb && openLb._close) openLb._close();
   var y = window.scrollY;
   var v = resolveView(parseHash());
-  if (!v.keepStyle) applyStyle(DATA.site.style);
+  applyStyle(DATA.site.style);
   app.innerHTML = navHtml(v.nav, v.progress) + '<main class="main" id="main">' + v.html + '</main>' +
     (v.bare ? '' : footHtml()) + fabHtml(v.fab);
   doc.title = v.title ? v.title + ' - ' + DATA.site.name : DATA.site.name;
