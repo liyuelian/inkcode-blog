@@ -56,6 +56,7 @@ var cleanups = [];
 var formDrafts = [];
 var renderedHash = '';
 var busyNow = false;
+var SYNC_ERROR = '';             // 已提交但同步未完成，或提交结果暂未确认时，暂停写入
 
 function store(kind) {
   var s = null;
@@ -543,31 +544,58 @@ function pullChanges(sha, list, target) {
 }
 function pullAll(sha) {
   return gh('GET', repoPath('/git/trees/' + sha + '?recursive=1')).then(function (tree) {
-    FILES = {};
+    if (tree.truncated) throw new Error('仓库文件列表不完整，请稍后重新同步。');
+    var files = {};
     return Promise.all(tree.tree.filter(function (e) { return e.type === 'blob' && SiteFiles.isContentPath(e.path); }).map(function (e) {
-      return rawFile(sha, e.path).then(function (t) { FILES[e.path] = t; });
-    }));
+      return rawFile(sha, e.path).then(function (t) { files[e.path] = t; });
+    })).then(function () { return files; });
   });
 }
-/* 读取内容：先用网站上生成好的快照，再补上快照之后的新提交 */
+/* 读取完整快照后再替换后台状态，失败时保留原来的完整内容。 */
 function loadContent() {
   return Promise.all([
     fetch('content.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
     headSha()
   ]).then(function (r) {
-    var snap = r[0], head = r[1];
-    var job;
+    var snap = r[0], head = r[1], job;
     if (snap && snap.commit && snap.files) {
-      FILES = snap.files;
-      job = snap.commit === head ? Promise.resolve()
-        : gh('GET', repoPath('/compare/' + snap.commit + '...' + head)).then(function (c) { return pullChanges(head, c.files || []); }, function () { return pullAll(head); });
+      var files = Object.assign({}, snap.files);
+      job = snap.commit === head ? Promise.resolve(files)
+        : gh('GET', repoPath('/compare/' + snap.commit + '...' + head)).then(function (c) {
+          if ((c.files || []).length >= 300 || (c.status && c.status !== 'ahead' && c.status !== 'identical')) return pullAll(head);
+          return pullChanges(head, c.files || [], files).then(function () { return files; });
+        }, function () { return pullAll(head); });
     } else job = pullAll(head);
-    return job.then(function () {
-      BASE_SHA = head;
-      DATA = normalize(SiteFiles.modelFromFiles(FILES));
-      LOADED = true;
+    return job.then(function (files) {
+      var data = normalize(SiteFiles.modelFromFiles(files));
+      FILES = files; BASE_SHA = head; DATA = data;
+      LOADED = true; SYNC_ERROR = '';
     });
   });
+}
+function showSyncNotice() {
+  var old = doc.getElementById('sync-notice');
+  if (old) old.remove();
+  if (!SYNC_ERROR || AUTH !== 'yes') return;
+  var main = doc.getElementById('main');
+  if (!main) return;
+  var notice = doc.createElement('div');
+  notice.id = 'sync-notice'; notice.className = 'notice'; notice.setAttribute('role', 'status');
+  notice.innerHTML = '<span>' + escHtml(SYNC_ERROR) + '</span> <button type="button" class="btn sm" id="sync-retry">重新同步</button>';
+  main.insertBefore(notice, main.firstChild);
+  $('#sync-retry', notice).onclick = function () {
+    if (busyNow) return;
+    flushFormDrafts();
+    if (formDrafts.some(function (d) { return d.dirty() && !d.saved(); })) {
+      toast('当前改动未能暂存，请保持此页打开，先备份正在编辑的内容。'); return;
+    }
+    busyNow = true; busy(true, '正在同步仓库内容…');
+    loadContent().then(function () {
+      busyNow = false; busy(false); render(); toast('后台已同步，本机暂存仍可恢复。');
+    }, function () {
+      busyNow = false; busy(false); toast('仍未同步成功，请检查网络后重试。本机暂存已保留。');
+    });
+  };
 }
 /* 用本次提交后的全部内容检查图片；先补齐别处的新内容，并保留本机草稿引用。 */
 function unusedImagesForCommit(head, treeSha, upstream, changes, binaries, deletions) {
@@ -608,8 +636,17 @@ function ghCommit(changes, binaries, deletions, message) {
           }).then(function (t) {
             return gh('POST', repoPath('/git/commits'), { message: message, tree: t.sha, parents: [head] });
           }).then(function (nc) {
+            var result = { sha: nc.sha, upstream: ups, removedImages: unused };
             return gh('PATCH', repoPath('/git/refs/heads/' + encodeURIComponent(GH.branch)), { sha: nc.sha }).then(function () {
-              return { sha: nc.sha, upstream: ups, removedImages: unused };
+              return result;
+            }, function (err) {
+              // 更新可能已经生效，只是响应丢失；先核对仓库，不能直接声称失败。
+              if (err && err.status && err.status < 500 && err.status !== 408) throw err;
+              return headSha().catch(function () { return null; }).then(function (head) {
+                if (head === nc.sha) return result;
+                var unknown = new Error('commit-unknown');
+                unknown.code = 'commit-unknown'; unknown.cause = err; throw unknown;
+              });
             });
           });
         });
@@ -619,7 +656,11 @@ function ghCommit(changes, binaries, deletions, message) {
 }
 function publishError(err) {
   var msg;
-  if (err && err.code === 'conflict') {
+  if (err && err.code === 'commit-unknown') {
+    SYNC_ERROR = '暂时无法确认本次提交结果。当前输入仍在，请先重新同步仓库，确认结果后再继续编辑。';
+    showSyncNotice();
+    msg = '提交结果待确认，请先重新同步，暂勿关闭当前页面。';
+  } else if (err && err.code === 'conflict') {
     msg = '这些内容刚在别处被修改过，已载入最新版本。草稿仍保存在这台设备上，可以恢复后再提交。';
     loadContent().then(function () { render(); }, function () {});
   } else if (err && (err.status === 401 || err.status === 403)) {
@@ -637,6 +678,7 @@ var EXT = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'imag
 function commit(mutate, opts) {
   if (busyNow) return;
   if (AUTH !== 'yes') { toast('请先连接 GitHub。'); setHash('#/login'); render(); return; }
+  if (SYNC_ERROR) { showSyncNotice(); toast('请先重新同步仓库，再继续保存或发布。'); return Promise.resolve(false); }
   flushFormDrafts();
   var next = clone(DATA);
   mutate(next);
@@ -676,25 +718,42 @@ function commit(mutate, opts) {
       throw err;
     });
   };
-  run().then(function (r) {
-    Object.keys(changes).forEach(function (k) { FILES[k] = changes[k]; });
-    deletions.forEach(function (k) { delete FILES[k]; });
+  var committed = null;
+  return run().then(function (r) {
+    committed = r;
+    var ownFiles = Object.assign({}, FILES);
+    Object.keys(changes).forEach(function (k) { ownFiles[k] = changes[k]; });
+    deletions.forEach(function (k) { delete ownFiles[k]; });
     r.removedImages.forEach(function (p) { delete LOCAL_IMAGES[p.slice('static'.length)]; });
     Object.keys(localImgs).forEach(function (k) { LOCAL_IMAGES[k] = localImgs[k]; });
-    return (r.upstream.length ? pullChanges(r.sha, r.upstream) : Promise.resolve()).then(function () {
-      BASE_SHA = r.sha;
-      DATA = normalize(SiteFiles.modelFromFiles(FILES));
-      if (opts.clearDraft) dropDraft(opts.clearDraft);
-      if (opts.onSuccess) opts.onSuccess();
+    var synced = Object.assign({}, ownFiles);
+    var finish = function (files, syncFailed) {
+      var data = normalize(SiteFiles.modelFromFiles(files));
+      FILES = files; BASE_SHA = r.sha; DATA = data;
+      SYNC_ERROR = syncFailed ? '内容已提交到 GitHub，但后台同步未完成。请重新同步后继续编辑，无需重复发布。' : '';
+      // 同步异常时先保留本机暂存，供断网或重新打开页面后恢复。
+      if (!syncFailed) {
+        if (opts.clearDraft) dropDraft(opts.clearDraft);
+        if (opts.onSuccess) opts.onSuccess();
+      }
       busy(false); busyNow = false;
       if (opts.returnTo) setHash(opts.returnTo);
       render();
-      toast((opts.toast || '已提交') + (r.removedImages.length ? '，已清理 ' + r.removedImages.length + ' 张未使用图片' : ''));
+      toast(syncFailed ? '内容已提交成功，但后台同步未完成，无需重复发布。' :
+        (opts.toast || '已提交') + (r.removedImages.length ? '，已清理 ' + r.removedImages.length + ' 张未使用图片' : ''));
       watchBuild(r.sha, opts.live);
-    });
+      return true;
+    };
+    return (r.upstream.length ? pullChanges(r.sha, r.upstream, synced) : Promise.resolve()).then(function () {
+      return finish(synced, false);
+    }, function () { return finish(ownFiles, true); });
   }).catch(function (err) {
     busy(false); busyNow = false;
-    publishError(err);
+    if (committed) {
+      SYNC_ERROR = '内容已提交到 GitHub，但后台显示未能更新。请重新同步，无需重复发布。';
+      showSyncNotice(); toast(SYNC_ERROR);
+    } else publishError(err);
+    return false;
   });
 }
 /* 提交之后跟踪 GitHub Actions 的构建进度 */
@@ -2215,6 +2274,7 @@ function compressImage(file) {
  */
 function mountEditor(main, cfg) {
   var st = Object.assign({}, cfg.base, { images: {} });
+  if (cfg.newId) st._entityId = cfg.newId();
   var els = {};
   Object.keys(cfg.fields).forEach(function (k) { els[k] = $(cfg.fields[k], main); });
   var body = els.content, prev = $('#f-prev', main), status = $('#ed-status', main), count = $('#ed-count', main);
@@ -2253,6 +2313,7 @@ function mountEditor(main, cfg) {
   cleanups.push(save.flush);
 
   mountDraftChoices(slot, cfg.logical, function (data) {
+    if (cfg.newId && typeof data._entityId === 'string' && SiteFiles.ID.test(data._entityId)) st._entityId = data._entityId;
     keys.forEach(function (k) { if (typeof data[k] === 'string') st[k] = data[k]; });
     st.images = data.images || {};
     fill(); save(); save.flush();
@@ -2373,7 +2434,7 @@ function viewEditPost(id) {
       mount: function (main) {
         var logical = 'post:' + (isNew ? 'new' : post.id), key = draftKey(logical);
         mountEditor(main, {
-          key: key, logical: logical,
+          key: key, logical: logical, newId: isNew ? newPostId : null,
           base: { title: post ? post.title : '', tags: post ? post.tags.join('，') : '', summary: post ? post.summary : '',
             series: post ? post.series : '', pinned: post && post.pinned ? '1' : '', content: post ? post.content : '' },
           fields: { title: '#f-title', tags: '#f-tags', summary: '#f-sum', series: '#f-series', pinned: '#f-pin', content: '#f-body' },
@@ -2381,7 +2442,7 @@ function viewEditPost(id) {
           markdown: true,
           onPublish: function (st, o) {
             var draft = !!(o && o.draft);
-            var pid = isNew ? newPostId() : post.id;
+            var pid = isNew ? st._entityId : post.id;
             var imgs = st.images;
             commit(function (d) {
               var now = nowISO();
@@ -2425,14 +2486,14 @@ function viewEditChapter(nid, cid) {
       mount: function (main) {
         var logical = 'ch:' + n.id + ':' + (isNew ? 'new' : c.id), key = draftKey(logical);
         mountEditor(main, {
-          key: key, logical: logical,
+          key: key, logical: logical, newId: isNew ? uid : null,
           base: { title: c ? c.title : '第' + cnNum(n.chapters.length + 1) + '章 ', content: c ? c.content : '',
             vol: c ? c.vol : (n.volumes.length ? n.volumes[n.volumes.length - 1].id : '') },
           fields: n.volumes.length ? { title: '#f-title', vol: '#f-vol', content: '#f-body' } : { title: '#f-title', content: '#f-body' },
           preview: function (st) { return renderChapterText(st.content); },
           onPublish: function (st, o) {
             var draft = !!(o && o.draft);
-            var chId = isNew ? uid() : c.id;
+            var chId = isNew ? st._entityId : c.id;
             commit(function (d) {
               var nn = d.novels.find(function (x) { return x.id === n.id; });
               if (!nn) return;
@@ -2493,6 +2554,7 @@ function viewEditNovel(id) {
     return {
       html: html, nav: 'admin', title: isNew ? '新建小说' : '管理作品',
       mount: function (main) {
+        var entityId = isNew ? uid() : n.id;
         var t = $('#n-title', main), g = $('#n-genre', main), syn = $('#n-syn', main), au = $('#n-author', main);
         t.value = cur.title; g.value = cur.genre; syn.value = cur.synopsis; au.value = cur.author;
         var drawCover = function () {
@@ -2510,8 +2572,9 @@ function viewEditNovel(id) {
         drawCover(); drawPick();
         var infoDraft = mountFormDraft(main, {
           key: 'novel-info:' + (isNew ? 'new' : n.id), label: '作品信息', slot: '#n-draft-slot', status: '#n-draft-status',
-          read: function () { return { title: t.value, genre: g.value, synopsis: syn.value, author: au.value, status: cur.status, cover: cur.cover, tpl: cur.tpl }; },
+          read: function () { return { _entityId: entityId, title: t.value, genre: g.value, synopsis: syn.value, author: au.value, status: cur.status, cover: cur.cover, tpl: cur.tpl }; },
           restore: function (d) {
+            if (isNew && typeof d._entityId === 'string' && SiteFiles.ID.test(d._entityId)) entityId = d._entityId;
             [[t, 'title'], [g, 'genre'], [syn, 'synopsis'], [au, 'author']].forEach(function (pair) {
               if (typeof d[pair[1]] === 'string') pair[0].value = d[pair[1]];
             });
@@ -2537,7 +2600,7 @@ function viewEditNovel(id) {
         $('#n-save', main).addEventListener('click', function () {
           var title = t.value.trim();
           if (!title) { toast('先写书名。'); t.focus(); return; }
-          var nid = isNew ? uid() : n.id;
+          var nid = entityId;
           commit(function (d) {
             var now = nowISO();
             var info = { title: title, genre: g.value.trim(), status: cur.status, synopsis: syn.value.trim(), cover: cur.cover, tpl: cur.tpl, author: au.value.trim(), updated: now };
@@ -2738,6 +2801,7 @@ function render(keepScroll) {
   var main = doc.getElementById('main');
   $$('.prose', main).forEach(enhanceProse);
   if (v.mount) v.mount(main);
+  showSyncNotice();
   window.scrollTo(0, keepScroll ? y : 0);
 }
 
@@ -2779,20 +2843,20 @@ function viewLogin() {
         if (!cfg.token) { msg.textContent = '请填写访问令牌。'; return; }
         btn.disabled = true;
         msg.textContent = '正在连接…';
-        var prev = GH;
+        var prev = GH, prevAuth = AUTH, prevSync = SYNC_ERROR;
         GH = cfg;
         gh('GET', repoPath('/branches/' + encodeURIComponent(cfg.branch))).then(function () {
-          LS.set(GH_KEY, JSON.stringify(cfg));
-          AUTH = 'yes';
+          AUTH = 'yes'; SYNC_ERROR = '后台内容尚未同步完成，请重新同步后再保存或发布。';
           msg.textContent = '正在读取内容…';
           return loadContent();
         }).then(function () {
+          LS.set(GH_KEY, JSON.stringify(cfg));
           btn.disabled = false;
           setHash('#/admin');
           render();
           toast('已连接');
         }, function (err) {
-          GH = prev;
+          GH = prev; AUTH = prevAuth; SYNC_ERROR = prevSync;
           btn.disabled = false;
           msg.textContent = err.status === 401 ? '令牌无效或已过期。' : err.status === 404 ? '找不到这个仓库或分支，或者令牌没有访问这个仓库的权限。' : '连接失败：' + err.message;
         });
@@ -2800,7 +2864,7 @@ function viewLogin() {
       var forget = $('#gh-forget', main);
       if (forget) forget.addEventListener('click', function () {
         LS.del(GH_KEY);
-        GH = null; AUTH = 'no'; LOADED = false;
+        GH = null; AUTH = 'no'; LOADED = false; SYNC_ERROR = '';
         DATA = normalize({});
         render();
         toast('已断开连接');
@@ -2812,6 +2876,7 @@ function initAuth() {
   GH = loadGh();
   if (!GH) { AUTH = 'no'; if (!/^#\/login/.test(location.hash)) setHash('#/login'); render(); return; }
   AUTH = 'yes';
+  SYNC_ERROR = '后台内容尚未同步完成，请重新同步后再保存或发布。';
   loadContent().then(function () { render(); }, function (err) {
     if (err.status === 401 || err.status === 404) { AUTH = 'no'; setHash('#/login'); }
     render();

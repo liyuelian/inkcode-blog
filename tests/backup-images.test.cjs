@@ -115,7 +115,7 @@ test('后台恢复通过所有语法写回图片文件与正确网址，不调�
   const { ctx } = context();
   const data = JSON.parse(await ctx.portableBackup());
   ctx.DATA = { site: { name: '原站' }, posts: [], novels: [], images: {} };
-  Object.assign(ctx, { AUTH: 'yes', busyNow: false, EXT: { 'image/png': 'png', 'image/jpeg': 'jpg' }, FILES: {},
+  Object.assign(ctx, { AUTH: 'yes', busyNow: false, SYNC_ERROR: '', EXT: { 'image/png': 'png', 'image/jpeg': 'jpg' }, FILES: {},
     flushFormDrafts() {}, busy() {}, render() {}, toast() {}, watchBuild() {}, normalize: x => x,
     publishError: err => { throw err; } });
   let uploaded;
