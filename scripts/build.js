@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { marked } = require('marked');
 const hljs = require('highlight.js');
 const SiteFiles = require('../admin/files.js');
+const { taxonomyPaths } = require('./taxonomy-paths.js');
 const { tokens } = require('../theme/tokens.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -53,7 +54,8 @@ const wordCount = (t) => ((t || '').match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []
 const fmtWords = (n) => (n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + ' 万' : String(n));
 const readMins = (t) => Math.max(1, Math.round(wordCount(t) / 400));
 const paras = (t) => (t || '').split(/\n+/).map((l) => l.trim()).filter(Boolean).map((l) => '<p>' + esc(l) + '</p>').join('');
-const dirName = (s) => String(s).trim().replace(/[\\/?#%"<>|*:\s]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
+const tagPaths = taxonomyPaths(posts.flatMap((p) => p.tags));
+const seriesPaths = taxonomyPaths(posts.map((p) => p.series).filter(Boolean));
 const novelWords = (n) => n.chapters.reduce((a, c) => a + wordCount(c.content), 0);
 function dateParts(iso) {
   const d = new Date(iso);
@@ -76,8 +78,8 @@ const sealText = () => (site.seal || '').trim() || Array.from(site.name || '印'
 const postUrl = (p) => u('/posts/' + p.id + '/');
 const novelUrl = (n) => u('/novels/' + n.id + '/');
 const chapterUrl = (n, c) => u('/novels/' + n.id + '/' + c.id + '/');
-const tagUrl = (t) => u('/tags/' + encodeURIComponent(dirName(t)) + '/');
-const seriesUrl = (s) => u('/series/' + encodeURIComponent(dirName(s)) + '/');
+const tagUrl = (t) => u('/tags/' + encodeURIComponent(tagPaths.get(t)) + '/');
+const seriesUrl = (s) => u('/series/' + encodeURIComponent(seriesPaths.get(s)) + '/');
 
 /* ---------- Markdown ---------- */
 const CALLOUTS = {
@@ -272,7 +274,7 @@ if (fs.existsSync(STATIC)) fs.cpSync(STATIC, OUT, { recursive: true });
 }
 
 // 标签
-const tagCount = {}, tagLast = {};
+const tagCount = Object.create(null), tagLast = Object.create(null);
 posts.forEach((p) => p.tags.forEach((t) => {
   tagCount[t] = (tagCount[t] || 0) + 1;
   if (!tagLast[t] || p.created > tagLast[t]) tagLast[t] = p.created;
@@ -295,20 +297,20 @@ paginate(listed, 8, '/blog/', (items, pg, total, p) => {
   }));
 });
 for (const t of allTags) {
-  const base = '/tags/' + dirName(t) + '/';
+  const base = '/tags/' + tagPaths.get(t) + '/';
   paginate(listed.filter((p) => p.tags.includes(t)), 8, base, (items, pg, total, p) => {
     write(p, layout({
       path: p, nav: 'blog', page: 'blog', title: '#' + t,
       body: '<div class="page-head"><h1>技术博客</h1><p>标签「' + esc(t) + '」下的 ' + tagCount[t] + ' 篇文章</p></div>' + chips(t) +
-        '<div class="post-list">' + items.map(postItem).join('') + '</div>' + pager(pg, total, u(encodeURI(base)))
+        '<div class="post-list">' + items.map(postItem).join('') + '</div>' + pager(pg, total, tagUrl(t))
     }));
   });
 }
-const seriesMap = {};
+const seriesMap = Object.create(null);
 posts.forEach((p) => { if (p.series) (seriesMap[p.series] = seriesMap[p.series] || []).push(p); });
 Object.values(seriesMap).forEach((l) => l.sort((a, b) => (a.created < b.created ? -1 : 1)));
 for (const [name, list] of Object.entries(seriesMap)) {
-  const p = '/series/' + dirName(name) + '/';
+  const p = '/series/' + seriesPaths.get(name) + '/';
   write(p, layout({
     path: p, nav: 'blog', page: 'blog', title: name,
     body: '<a class="back" href="' + u('/blog/') + '">‹ 技术博客</a><div class="page-head"><h1>' + esc(name) + '</h1><p>系列文章，共 ' + list.length + ' 篇，按发布顺序排列</p></div>' +
