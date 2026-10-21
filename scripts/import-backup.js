@@ -19,13 +19,16 @@ const imageUrl = {};
 let skipped = 0;
 for (const [id, src] of Object.entries(data.images || {})) {
   const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(src || '');
-  if (m && EXT[m[1]] && /^[a-z0-9]+$/i.test(id)) {
+  if (m && EXT[m[1]] && /^[a-z0-9_-]+$/i.test(id)) {
     const name = id + '.' + EXT[m[1]];
     fs.writeFileSync(path.join(imgDir, name), Buffer.from(m[2], 'base64'));
     imageUrl[id] = '/images/' + name;
   } else skipped++;
 }
-const fixImages = (md) => String(md || '').replace(/\]\(img:([a-z0-9]+)\)/gi, (all, id) => imageUrl[id] ? '](' + imageUrl[id] + ')' : all);
+const fixImages = (md) => SiteFiles.rewriteImageUrls(md, (url) => {
+  const m = /^img:([A-Za-z0-9_-]+)([?#].*)?$/.exec(url);
+  return m && Object.prototype.hasOwnProperty.call(imageUrl, m[1]) ? imageUrl[m[1]] + (m[2] || '') : url;
+});
 const s = data.site || {};
 const model = {
   site: {

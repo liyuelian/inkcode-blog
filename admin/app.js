@@ -641,15 +641,23 @@ function commit(mutate, opts) {
   var next = clone(DATA);
   mutate(next);
   /* 新插入的图片：存成 static/images/ 里的文件，正文里的 img:编号 换成图片地址 */
-  var binaries = {}, localImgs = {};
+  var binaries = {}, localImgs = {}, candidates = Object.create(null);
   Object.keys(next.images || {}).forEach(function (id) {
     var m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(next.images[id] || '');
     if (!m || !EXT[m[1]]) return;
-    var url = '/images/' + id + '.' + EXT[m[1]], used = false;
-    next.posts.forEach(function (p) {
-      if (p.content.indexOf('img:' + id) >= 0) { p.content = p.content.split('](img:' + id + ')').join('](' + url + ')'); used = true; }
+    candidates[id] = { url: '/images/' + id + '.' + EXT[m[1]], bytes: m[2], used: false };
+  });
+  next.posts.forEach(function (p) {
+    p.content = SiteFiles.rewriteImageUrls(p.content, function (src) {
+      var ref = /^img:([A-Za-z0-9_-]+)([?#].*)?$/.exec(src);
+      var image = ref && candidates[ref[1]];
+      if (!image) return src;
+      image.used = true; return image.url + (ref[2] || '');
     });
-    if (used) { binaries['static' + url] = m[2]; localImgs[url] = next.images[id]; }
+  });
+  Object.keys(candidates).forEach(function (id) {
+    var image = candidates[id];
+    if (image.used) { binaries['static' + image.url] = image.bytes; localImgs[image.url] = next.images[id]; }
   });
   next.images = {};
   var oldF = SiteFiles.filesFromModel(DATA), newF = SiteFiles.filesFromModel(next);
@@ -1609,13 +1617,16 @@ function fetchBackupImage(src) {
 function collectBackupImages(d, read) {
   var ids = Object.keys(d.images);
   return Promise.all(ids.map(function (id) {
-    return Promise.resolve().then(function () { return read(resolveImg(d.images[id])); })
+    return Promise.resolve().then(function () {
+      var src = typeof d.images[id] === 'string' ? resolveImg(d.images[id]) : '';
+      return src ? read(src) : null;
+    })
       .then(function (value) { return value || null; }, function () { return null; });
   })).then(function (values) {
     var missing = ids.filter(function (id, i) { return !values[i]; });
     if (missing.length) {
       var err = new Error('有 ' + missing.length + ' 张图片读取失败，本次未导出。请检查网络后重试：' + missing.slice(0, 3).map(function (id) {
-        return d.images[id].split('/').pop();
+        return String(d.images[id] || id).split('/').pop();
       }).join('、') + (missing.length > 3 ? ' 等' : ''));
       err.code = 'backup-images'; throw err;
     }
@@ -1624,11 +1635,37 @@ function collectBackupImages(d, read) {
     return images;
   });
 }
-/* 导出用：把正文里的 /images/xxx 换回 img:编号，图片单独列出，和旧版备份格式一致 */
+/* 把实际图片引用转换成可移植地址，保留标题、引用式语法和 HTML 属性。 */
 function portableData() {
-  var d = clone(DATA), images = {};
+  var d = clone(DATA), images = Object.create(null), sources = Object.create(null);
+  var own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
   d.posts.forEach(function (p) {
-    p.content = p.content.replace(/\]\((\/images\/([A-Za-z0-9_-]+)\.(webp|jpe?g|png|gif))\)/g, function (all, url, id) { images[id] = url; return '](img:' + id + ')'; });
+    p.content = SiteFiles.rewriteImageUrls(p.content, function (raw) {
+      var url = raw.replace(/&amp;/gi, '&').replace(/&#(x[0-9a-f]+|[0-9]+);/gi, function (all, n) {
+        var c = n[0].toLowerCase() === 'x' ? parseInt(n.slice(1), 16) : parseInt(n, 10);
+        return c <= 0x10ffff ? String.fromCodePoint(c) : all;
+      }).replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, '$1');
+      try { url = decodeURI(url); } catch (e) {}
+      // 已在内存中的旧版/刚导入的图片同样需要进入完整备份。
+      var old = /^img:([A-Za-z0-9_-]+)([?#].*)?$/.exec(url);
+      if (old) {
+        images[old[1]] = own(d.images, old[1]) ? d.images[old[1]] : null;
+        return 'img:' + old[1] + (old[2] || '');
+      }
+      var site = (CFG.siteUrl || '').replace(/\/$/, '');
+      if (site && url.indexOf(site + '/images/') === 0) url = url.slice(site.length);
+      var base = (CFG.base || '').replace(/\/$/, '');
+      if (base && url.indexOf(base + '/images/') === 0) url = url.slice(base.length);
+      var m = /^(\/images\/([A-Za-z0-9_-]+)\.(webp|jpe?g|png|gif))([?#].*)?$/i.exec(url);
+      if (!m) return raw; // 外链保持原样，不下载第三方图片。
+      var source = m[1], id = sources[source], stem = m[2], n = 2;
+      if (!id) {
+        id = stem;
+        while (own(images, id) || own(d.images, id)) id = stem + '-' + n++;
+        sources[source] = id; images[id] = source;
+      }
+      return 'img:' + id + (m[4] || '');
+    });
   });
   d.images = images;
   return d;
@@ -1666,7 +1703,10 @@ function buildZipWith(JSZip, imgBytes, model) {
     zip.file('图片/' + id + '.' + b.ext, b.bytes);
   });
   var fixImgs = function (md) {
-    return md.replace(/\]\(img:([a-z0-9_-]+)\)/gi, function (m, id) { return '](../图片/' + id + '.' + (exts[id] || 'jpg') + ')'; });
+    return SiteFiles.rewriteImageUrls(md, function (url) {
+      var m = /^img:([A-Za-z0-9_-]+)([?#].*)?$/.exec(url);
+      return m && Object.prototype.hasOwnProperty.call(exts, m[1]) ? '../图片/' + m[1] + '.' + exts[m[1]] + (m[2] || '') : url;
+    });
   };
   var y = function (s) { return JSON.stringify(String(s == null ? '' : s)); };
   // 导出已转换图片引用的数据，按发布时间排序。

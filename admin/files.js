@@ -121,6 +121,73 @@
     return files;
   }
 
+  /* 只改图片目的地址，保留 Markdown 的标题、引用定义和 HTML 属性。
+   * 代码示例不参与备份；同一函数用于导出、恢复和命令行导入。 */
+  function rewriteImageUrls(markdown, change) {
+    var text = String(markdown || ''), edits = [], protectedText = text.split('');
+    function mask(start, end) { for (var i = start; i < end; i++) if (protectedText[i] !== '\n') protectedText[i] = ' '; }
+    // 围栏代码先屏蔽，再处理行内代码；保持原始字符位置不变。
+    var lines = /[^\n]*(?:\n|$)/g, line, fence = null, start = 0;
+    while ((line = lines.exec(text)) && line[0]) {
+      var f = /^ {0,3}(`{3,}|~{3,})(.*)/.exec(line[0]);
+      if (!fence && f) { fence = f[1]; start = line.index; }
+      else if (fence && f && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) {
+        mask(start, lines.lastIndex); fence = null;
+      }
+    }
+    if (fence) mask(start, text.length);
+    var visible = protectedText.join('');
+    var code = /<!--[^]*?-->|<(pre|code)\b[^>]*>[^]*?<\/\1\s*>|(`+)([^]*?)\2(?!`)/gi, m;
+    while ((m = code.exec(visible))) mask(m.index, code.lastIndex);
+    visible = protectedText.join('');
+    function replaceAt(start, raw, kind) {
+      var next = change(raw, kind);
+      if (typeof next === 'string' && next !== raw) edits.push({ start: start, end: start + raw.length, value: next });
+    }
+    var htmlVisible = visible;
+    visible = visible.replace(/<(?:img|source)\b(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>/gi, function (tag) { return tag.replace(/[^\n]/g, ' '); });
+    var label = function (s) { return s.replace(/\\([\[\]\\])/g, '$1').replace(/\s+/g, ' ').trim().toLowerCase(); };
+    // 目的地址支持 <尖括号>、空白、可选标题，及文件名中的转义字符。
+    var destination = '(?:<([^>\\n]*)>|((?:\\\\.|[^\\s()\\\\]|\\([^\\n)]*\\))*))';
+    var alt = '((?:\\\\.|[^\\[\\]\\\\]|\\[[^\\]]*\\])*)';
+    var inline = new RegExp('!\\[' + alt + '\\]\\(\\s*' + destination, 'g');
+    while ((m = inline.exec(visible))) {
+      if ((/\\+$/.exec(visible.slice(0, m.index)) || [''])[0].length % 2) continue;
+      var raw = m[2] !== undefined ? m[2] : m[3];
+      replaceAt(m.index + m[0].lastIndexOf(raw), text.slice(m.index + m[0].lastIndexOf(raw), m.index + m[0].lastIndexOf(raw) + raw.length), 'markdown');
+    }
+    var refs = Object.create(null), ref = new RegExp('!\\[' + alt + '\\](?!\\()(?:[ \\t]*\\[([^\\]]*)\\])?', 'g');
+    while ((m = ref.exec(visible))) {
+      if (!((/\\+$/.exec(visible.slice(0, m.index)) || [''])[0].length % 2)) refs[label(m[2] || m[1])] = true;
+    }
+    var definition = new RegExp('^ {0,3}\\[([^\\]\\n]+)\\]:[ \\t]*(?:\\n[ \\t]*)?' + destination, 'gm');
+    while ((m = definition.exec(visible))) {
+      if (!refs[label(m[1])]) continue;
+      var raw = m[2] !== undefined ? m[2] : m[3], at = m.index + m[0].lastIndexOf(raw);
+      replaceAt(at, text.slice(at, at + raw.length), 'markdown');
+    }
+    var tag = /<(?:img|source)\b(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>/gi;
+    while ((m = tag.exec(htmlVisible))) {
+      var html = text.slice(m.index, tag.lastIndex), attr = /\s(src|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s<>"'`=]+))/gi, a;
+      while ((a = attr.exec(html))) {
+        var raw = a[2] !== undefined ? a[2] : a[3] !== undefined ? a[3] : a[4];
+        var at = m.index + a.index + a[0].indexOf('=') + 1;
+        while (/\s/.test(text[at])) at++;
+        if (text[at] === '"' || text[at] === "'") at++;
+        if (a[1].toLowerCase() === 'src') replaceAt(at, raw, 'html');
+        else {
+          // srcset 的每个候选地址独立转换，保留像素密度/宽度描述。
+          var candidate = /(?:^|,)\s*([^\s,]+)/g, c;
+          while ((c = candidate.exec(raw))) replaceAt(at + c.index + c[0].lastIndexOf(c[1]), c[1], 'html');
+        }
+      }
+    }
+    edits.sort(function (a, b) { return b.start - a.start; }).forEach(function (e) {
+      text = text.slice(0, e.start) + e.value + text.slice(e.end);
+    });
+    return text;
+  }
+
   function isContentPath(p) { return p === 'content/site.json' || /^content\/(posts|novels)\/.+\.(md|json)$/.test(p); }
 
   /* 保守检查：正文、草稿、设置中提到文件名就保留，也识别编码网址和旧版 img:编号。 */
@@ -141,5 +208,5 @@
     });
   }
 
-  return { parse: parse, stringify: stringify, modelFromFiles: modelFromFiles, filesFromModel: filesFromModel, isContentPath: isContentPath, unusedImagePaths: unusedImagePaths, ID: ID };
+  return { rewriteImageUrls: rewriteImageUrls, parse: parse, stringify: stringify, modelFromFiles: modelFromFiles, filesFromModel: filesFromModel, isContentPath: isContentPath, unusedImagePaths: unusedImagePaths, ID: ID };
 });
