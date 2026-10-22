@@ -29,9 +29,7 @@ button,input,textarea{font:inherit;color:inherit}
 .mode-btn svg{width:19px;height:19px}
 @media (prefers-reduced-motion:no-preference){
   :root.mode-anim,:root.mode-anim body,:root.mode-anim *,:root.mode-anim *::before,:root.mode-anim *::after{transition:background-color .4s ease,color .4s ease,border-color .4s ease,box-shadow .4s ease!important}
-  .mode-btn svg{animation:modeIn .35s ease}
 }
-@keyframes modeIn{from{opacity:0;transform:rotate(-60deg) scale(.6)}to{opacity:1;transform:none}}
 
 /* ---------- 主体 ---------- */
 .main{position:relative;z-index:1;max-width:var(--maxw);margin:0 auto;padding:28px 20px 96px}

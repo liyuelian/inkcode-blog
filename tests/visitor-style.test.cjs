@@ -6,7 +6,7 @@ const os = require('node:os');
 const vm = require('node:vm');
 const { execFileSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
-const source = fs.readFileSync(path.join(root, 'theme/site.js'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'theme/appearance.js'), 'utf8');
 function part(start, end) {
   const a = source.indexOf(start), b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a); return source.slice(a, b);
@@ -27,7 +27,7 @@ function reader({ base = '/blog', defaults = 'terminal', blocked = false, values
       dispatchEvent: e => events.push(e.type), matchMedia: () => ({ matches: systemState.mode === 'dark' }) }, Event: class { constructor(type) { this.type = type; } },
     setTimeout: () => 0, clearTimeout() {},
     $$: selector => selector.includes('visitor-mode') ? modeInputs : inputs, toast: message => messages.push(message) };
-  vm.createContext(ctx); vm.runInContext(part('function store()', 'var LS =') + '\nvar LS = store();\n' + part('/* ---------- 访客主题', 'function copyText('), ctx);
+  vm.createContext(ctx); vm.runInContext(part('function store()', 'var LS =') + '\nvar LS = store();\n' + part('/* ---------- 访客主题', '/* ---------- 页面挂载'), ctx);
   return { ctx, values, attrs, key, links, inputs, modeInputs, systemState, messages, events };
 }
 
@@ -103,7 +103,32 @@ test('禁止存储时日夜模式仍即时生效，不清除风格且说明无�
   assert.equal(r.attrs['data-style'], 'minimal'); assert.ok(r.messages[0].includes('无法记住选择'));
 });
 
-test('实际构建：各类前台页面都有切换入口，首屏脚本在样式表前应用偏好且安全序列化配置', () => {
+test('后台反复挂载菜单仍只绑定一次，替换后的菜单可切换且不覆盖站点默认', () => {
+  for (const blocked of [false, true]) {
+    const r = reader({ blocked }), listeners = {}, windowListeners = {};
+    const get = r.ctx.doc.getElementById;
+    let picker = { hidden: true };
+    r.ctx.doc.getElementById = id => id === 'style-switch' ? picker : get(id);
+    r.ctx.doc.addEventListener = (name, handler) => { (listeners[name] ||= []).push(handler); };
+    r.ctx.window.addEventListener = (name, handler) => { (windowListeners[name] ||= []).push(handler); };
+    vm.runInContext(part('/* ---------- 页面挂载', 'window.SiteAppearance ='), r.ctx);
+    r.ctx.mount();
+    const change = value => listeners.change[0]({ target: { value, closest: () => picker,
+      matches: selector => selector.includes('visitor-style') } });
+    change('paper');
+    picker = { hidden: true }; // 后台跳转后生成的新导航。
+    r.ctx.mount({ defaultStyle: 'minimal' }); r.ctx.mount();
+    assert.equal(picker.hidden, false);
+    assert.equal(r.attrs['data-style'], 'paper');
+    assert.equal(r.attrs['data-default-style'], 'minimal');
+    assert.equal(listeners.change.length, 1); assert.equal(listeners.click.length, 1);
+    assert.equal(listeners.keydown.length, 1); assert.equal(windowListeners.storage.length, 1);
+    change('terminal'); assert.equal(r.attrs['data-style'], 'terminal');
+    assert.equal(r.attrs['data-default-style'], 'minimal');
+  }
+});
+
+test('实际构建：前后台共用菜单与偏好，首屏在样式表前应用偏好且安全序列化配置', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkcode-visitor-style-'));
   try {
     for (const folder of ['scripts', 'admin', 'theme']) fs.cpSync(path.join(root, folder), path.join(dir, folder), { recursive: true });
@@ -138,6 +163,18 @@ test('实际构建：各类前台页面都有切换入口，首屏脚本在样�
     const files = ['index.html', 'blog/index.html', 'posts/a/index.html', 'novels/index.html', 'archive/index.html', 'search/index.html', '404.html'];
     for (const file of files) assert.ok(fs.readFileSync(path.join(dir, 'dist', file), 'utf8').includes('id="style-switch"'), file);
     const admin = fs.readFileSync(path.join(dir, 'dist/admin/index.html'), 'utf8');
-    assert.ok(!admin.includes('appearance-config')); // 读者偏好不接管作者后台设置。
+    assert.deepEqual(JSON.parse(admin.match(/id="appearance-config">([^]*?)<\/script>/)[1]), config);
+    assert.ok(admin.includes('<template id="appearance-template"><details'));
+    assert.ok(admin.includes('data-base="/blog"'));
+    const shared = '/blog/assets/appearance.js?v=';
+    assert.ok(home.includes(shared)); assert.ok(admin.includes(shared));
+    assert.ok(home.indexOf(shared) < home.indexOf('/assets/site.js?v='));
+    assert.ok(admin.indexOf(shared) < admin.indexOf('src="app.js?v='));
+    assert.ok(admin.indexOf('appearance-config') < admin.indexOf('href="admin.css'));
+    assert.equal(fs.readFileSync(path.join(dir, 'dist/assets/appearance.js'), 'utf8'), source);
+    const app = fs.readFileSync(path.join(dir, 'dist/admin/app.js'), 'utf8');
+    assert.ok(app.includes('window.SiteAppearance.mount({ defaultStyle: k, toast: toast })'));
+    assert.ok(!app.includes('mode-btn')); assert.ok(!app.includes('watchSystemMode'));
+    assert.ok(!app.includes('data-style="'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

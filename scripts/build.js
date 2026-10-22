@@ -164,9 +164,11 @@ const appearanceBoot = '(function(){var a=JSON.parse(document.getElementById("ap
 const modeBoot = '(function(){var r=document.documentElement,m;try{m=localStorage.getItem("site:mode")}catch(e){}if(m!=="dark"&&m!=="light"){m=r.getAttribute("data-theme");if(m!=="dark"&&m!=="light")m=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";try{localStorage.setItem("site:mode",m)}catch(e){}}r.setAttribute("data-mode",m)})();';
 const css = tokens + fs.readFileSync(path.join(ROOT, 'theme', 'style.css'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'theme', 'extra.css'), 'utf8');
 const siteJs = fs.readFileSync(path.join(ROOT, 'theme', 'site.js'), 'utf8');
+const appearanceJs = fs.readFileSync(path.join(ROOT, 'theme', 'appearance.js'), 'utf8');
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 10);
 const CSS_URL = u('/assets/site.css?v=' + hash(css));
 const JS_URL = u('/assets/site.js?v=' + hash(siteJs));
+const APPEARANCE_URL = u('/assets/appearance.js?v=' + hash(appearanceJs));
 
 /* ---------- 页面外壳 ---------- */
 const ICON = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%96%8B%3C/text%3E%3C/svg%3E';
@@ -206,6 +208,7 @@ function layout(o) {
     (fontHref ? '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n<link id="font-link" rel="stylesheet" href="' + esc(fontHref) + '" media="print" onload="this.media=\'all\'">\n' : '') +
     '<script type="application/json" id="appearance-config">' + appearanceConfig + '</script>\n<script>' + appearanceBoot + '</script>\n' +
     '<link rel="stylesheet" href="' + CSS_URL + '">\n' +
+    '<script defer src="' + APPEARANCE_URL + '"></script>\n' +
     '<script defer src="' + JS_URL + '"></script>\n' +
     '</head>\n<body data-page="' + (o.page || '') + '" data-base="' + esc(BASE) + '"' + (o.attrs || '') + '>\n' +
     '<header class="nav"><div class="nav-in reader-nav"><a class="brand" href="' + u('/') + '"><span class="brand-name">' + esc(site.name) + '</span></a>' +
@@ -274,6 +277,7 @@ fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(path.join(OUT, 'assets'), { recursive: true });
 fs.writeFileSync(path.join(OUT, 'assets', 'site.css'), css);
 fs.writeFileSync(path.join(OUT, 'assets', 'site.js'), siteJs);
+fs.writeFileSync(path.join(OUT, 'assets', 'appearance.js'), appearanceJs);
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 const STATIC = path.join(ROOT, 'static');
 if (fs.existsSync(STATIC)) fs.cpSync(STATIC, OUT, { recursive: true });
@@ -473,6 +477,7 @@ fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nDisallow: /admin/
 /* ---------- 手机后台 ---------- */
 require('./build-admin.js')({
   OUT, ROOT, css, contentFiles, siteUrl: SITE_URL, base: BASE,
+  appearance: { config: appearanceConfig, styleBoot: appearanceBoot, modeBoot, picker: appearancePicker(), scriptUrl: APPEARANCE_URL },
   repo: process.env.GITHUB_REPOSITORY || site.repo || '', branch: process.env.GITHUB_REF_NAME || site.branch || 'main',
   commit: process.env.GITHUB_SHA || ''
 });

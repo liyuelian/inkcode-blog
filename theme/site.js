@@ -46,100 +46,6 @@ function toast(msg) {
   t._h = setTimeout(function () { t.classList.remove('show'); }, Math.max(2400, msg.length * 110));
 }
 
-/* ---------- 访客主题：只保存本浏览器的选择，不改网站发布设置 ---------- */
-var STYLE_NAMES = { paper: '书卷纸墨', minimal: '极简留白', terminal: '暗夜终端' };
-var APPEARANCE = (function () {
-  try { return JSON.parse(doc.getElementById('appearance-config').textContent); } catch (e) { return {}; }
-})();
-var STYLE_KEY = APPEARANCE.storageKey || NS + 'style:' + (BASE || '/');
-function isStyle(k) { return Object.prototype.hasOwnProperty.call(STYLE_NAMES, k); }
-function defaultStyle() {
-  var fallback = root.getAttribute('data-default-style') || APPEARANCE.defaultStyle;
-  return isStyle(fallback) ? fallback : 'paper';
-}
-function preferredStyle() {
-  var saved = LS.get(STYLE_KEY);
-  return isStyle(saved) ? saved : defaultStyle();
-}
-function applyVisitorStyle(choice) {
-  var style = isStyle(choice) ? choice : defaultStyle();
-  root.setAttribute('data-style', style);
-  var href = APPEARANCE.fonts && APPEARANCE.fonts[style];
-  if (href) {
-    var link = doc.getElementById('font-link');
-    if (!link) { link = doc.createElement('link'); link.id = 'font-link'; link.rel = 'stylesheet'; doc.head.appendChild(link); }
-    if (link.getAttribute('href') !== href) link.setAttribute('href', href);
-  }
-  $$('#style-switch input[name="visitor-style"]').forEach(function (input) {
-    input.checked = input.value === style;
-    input.closest('label').classList.toggle('selected', input.checked);
-  });
-  // 字体、间距及导航高度变化后，重新计算阅读进度和目录位置。
-  window.dispatchEvent(new Event('resize'));
-  return style;
-}
-function chooseVisitorStyle(choice) {
-  if (!isStyle(choice)) return;
-  var saved = LS.set(STYLE_KEY, choice);
-  var style = applyVisitorStyle(choice);
-  toast('已切换为' + STYLE_NAMES[style] +
-    (saved ? '。' : '。当前浏览器无法记住选择。'));
-}
-function initAppearance() {
-  applyVisitorStyle(preferredStyle());
-  var picker = doc.getElementById('style-switch');
-  if (picker) {
-    picker.hidden = false;
-    picker.addEventListener('change', function (e) {
-      if (e.target.matches('input[name="visitor-style"]')) chooseVisitorStyle(e.target.value);
-      if (e.target.matches('input[name="visitor-mode"]')) chooseMode(e.target.value);
-    });
-    doc.addEventListener('click', function (e) { if (!picker.contains(e.target)) picker.open = false; });
-    doc.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && picker.open) { e.preventDefault(); picker.open = false; $('summary', picker).focus(); }
-    });
-  }
-  window.addEventListener('storage', function (e) {
-    if (e.key === STYLE_KEY || e.key === null) applyVisitorStyle(preferredStyle());
-    if (e.key === MODE_KEY || e.key === null) applyMode(preferredMode());
-  });
-}
-
-var MODE_KEY = NS + 'mode';
-function systemMode() {
-  var t = root.getAttribute('data-theme');
-  if (t === 'dark' || t === 'light') return t;
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-function preferredMode() {
-  var mode = LS.get(MODE_KEY);
-  var current = root.getAttribute('data-mode');
-  return mode === 'light' || mode === 'dark' ? mode : (current === 'light' || current === 'dark' ? current : systemMode());
-}
-function applyMode(m) {
-  root.setAttribute('data-mode', m === 'dark' || m === 'light' ? m : preferredMode());
-  updateModeOptions();
-}
-function updateModeOptions() {
-  var mode = root.getAttribute('data-mode');
-  $$('#style-switch input[name="visitor-mode"]').forEach(function (input) {
-    input.checked = input.value === mode;
-    input.closest('label').classList.toggle('selected', input.checked);
-  });
-}
-var modeAnimTimer = null;
-function chooseMode(next) {
-  if (next !== 'light' && next !== 'dark') return;
-  root.classList.add('mode-anim');
-  clearTimeout(modeAnimTimer);
-  modeAnimTimer = setTimeout(function () { root.classList.remove('mode-anim'); }, 500);
-  var saved = LS.set(MODE_KEY, next);
-  applyMode(next);
-  toast('已切换到' + (next === 'dark' ? '夜间' : '日间') + '模式' +
-    (saved ? '。' : '。当前浏览器无法记住选择。'));
-}
-
-
 function copyText(t) {
   var legacy = function () {
     var ta = doc.createElement('textarea');
@@ -696,7 +602,7 @@ function redirectOldHash() {
 
 /* ---------- 启动 ---------- */
 function init() {
-  initAppearance();
+  if (window.SiteAppearance) window.SiteAppearance.mount({ toast: toast });
   doc.addEventListener('click', function (e) {
     var t = e.target;
     var cp = t.closest('.code-copy');
@@ -724,9 +630,6 @@ function init() {
       openLightbox(imgs.map(function (x) { return { src: x.currentSrc || x.src, alt: x.getAttribute('alt') || '' }; }), imgs.indexOf(im));
     }
   });
-  var mode = preferredMode();
-  applyMode(mode);
-  if (LS.get(MODE_KEY) !== mode) LS.set(MODE_KEY, mode);
   var page = body.getAttribute('data-page');
   if (page === 'home') redirectOldHash();
   if (page === 'post') setupReading($('.article'), { toc: true });

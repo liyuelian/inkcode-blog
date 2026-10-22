@@ -25,12 +25,6 @@ Object.keys(LIB_PATHS).forEach(function (k) {
     ? CFG.libBase.replace(/\/$/, '') + '/' + LIB_PATHS[k].split('/').pop()
     : 'https://cdnjs.cloudflare.com/ajax/libs/' + LIB_PATHS[k];
 });
-var FONT_BASE = typeof CFG.fontBase === 'string' ? CFG.fontBase : 'https://fonts.googleapis.com/css2';
-function fontHref(style) {
-  if (!FONT_BASE) return '';
-  var m = STYLE_META[style] || STYLE_META.paper;
-  return FONT_BASE + (FONT_BASE.indexOf('?') >= 0 ? '&' : '?') + m.fonts + '&display=swap';
-}
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -415,18 +409,7 @@ function renderChapterText(t) {
 
 /* ---------- 外观 ---------- */
 function applyStyle(k) {
-  if (!STYLE_META[k]) k = 'paper';
-  if (root.getAttribute('data-style') !== k) root.setAttribute('data-style', k);
-  var link = doc.getElementById('font-link');
-  var href = fontHref(k);
-  if (!href) { if (link) link.remove(); return; }
-  if (!link) {
-    link = doc.createElement('link');
-    link.id = 'font-link';
-    link.rel = 'stylesheet';
-    doc.head.appendChild(link);
-  }
-  if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+  if (window.SiteAppearance) window.SiteAppearance.mount({ defaultStyle: k, toast: toast });
 }
 
 /* ---------- 提示、弹窗、发布中 ---------- */
@@ -899,69 +882,22 @@ function restoreChapterPlan(n, saved) {
   return { vols: vols, order: order };
 }
 
-/* ---------- 日间 / 夜间 ---------- */
-var MODE_KEY = NS + 'mode';
-function systemMode() {
-  var t = root.getAttribute('data-theme');
-  if (t === 'dark' || t === 'light') return t;
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-function effectiveMode() {
-  var m = root.getAttribute('data-mode');
-  return m === 'dark' || m === 'light' ? m : systemMode();
-}
-function applyMode(m) {
-  if (m === 'dark' || m === 'light') root.setAttribute('data-mode', m);
-  else root.removeAttribute('data-mode');
-}
-function modeBtnHtml() {
-  var dark = effectiveMode() === 'dark';
-  return '<button type="button" class="mode-btn" id="mode-btn" aria-label="' + (dark ? '切换到日间模式' : '切换到夜间模式') + '" title="' +
-    (dark ? '日间模式' : '夜间模式') + '">' + (dark ? SUN : MOON) + '</button>';
-}
-function updateModeBtn() {
-  var b = doc.getElementById('mode-btn');
-  if (b) b.outerHTML = modeBtnHtml();
-}
-var modeAnimTimer = null;
-function toggleMode() {
-  var next = effectiveMode() === 'dark' ? 'light' : 'dark';
-  root.classList.add('mode-anim');
-  clearTimeout(modeAnimTimer);
-  modeAnimTimer = setTimeout(function () { root.classList.remove('mode-anim'); }, 500);
-  /* 和系统一致时就不再记住，之后继续跟随系统 */
-  if (next === systemMode()) { applyMode(null); LS.del(MODE_KEY); }
-  else { applyMode(next); LS.set(MODE_KEY, next); }
-  updateModeBtn();
-  var b = doc.getElementById('mode-btn');
-  if (b) b.focus();
-}
-function watchSystemMode() {
-  var sync = function () {
-    if (root.getAttribute('data-mode') && root.getAttribute('data-mode') === systemMode()) { applyMode(null); LS.del(MODE_KEY); }
-    updateModeBtn();
-  };
-  if (window.matchMedia) {
-    var mq = window.matchMedia('(prefers-color-scheme: dark)');
-    if (mq.addEventListener) mq.addEventListener('change', sync); else if (mq.addListener) mq.addListener(sync);
-  }
-  if (window.MutationObserver) new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
-}
-
 /* ---------- 外壳 ---------- */
-var SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>';
-var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7Z"/></svg>';
+function appearanceHtml() {
+  var template = doc.getElementById('appearance-template');
+  return template ? template.innerHTML : '';
+}
 var PEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 
 function navHtml(active, progress) {
   var links = [['blog', '博客', '#/blog'], ['novels', '小说', '#/novels'], ['archive', '归档', '#/archive']];
   if (AUTH === 'yes') links.push(['admin', '写作', '#/admin']);
-  return '<header class="nav"><div class="nav-in">' +
+  return '<header class="nav"><div class="nav-in reader-nav">' +
     '<a class="brand" href="#/"><span class="brand-name">' + escHtml(DATA.site.name) + '</span></a>' +
     '<nav class="nav-links" aria-label="主导航">' + links.map(function (l) {
       return '<a href="' + l[2] + '" class="' + (l[0] === active ? 'on' : '') + (l[0] === 'admin' ? ' write' : '') + '"' +
         (l[0] === active ? ' aria-current="page"' : '') + '>' + l[1] + '</a>';
-    }).join('') + '</nav>' + modeBtnHtml() + '</div>' +
+    }).join('') + '</nav>' + appearanceHtml() + '</div>' +
     (progress ? '<div class="read-progress" id="read-progress" aria-hidden="true"></div>' : '') + '</header>';
 }
 function footHtml() {
@@ -2765,9 +2701,9 @@ function render(keepScroll) {
   if (openLb && openLb._close) openLb._close();
   var y = window.scrollY;
   var v = resolveView(parseHash());
-  applyStyle(DATA.site.style);
   app.innerHTML = navHtml(v.nav, v.progress) + '<main class="main" id="main">' + v.html + '</main>' +
     (v.bare ? '' : footHtml()) + fabHtml(v.fab);
+  applyStyle(DATA.site.style);
   doc.title = v.title ? v.title + ' - ' + DATA.site.name : DATA.site.name;
   var main = doc.getElementById('main');
   $$('.prose', main).forEach(enhanceProse);
@@ -2878,7 +2814,6 @@ function boot() {
       var imgs = $$('img', im.closest('.prose')).filter(function (x) { return !x.closest('a'); });
       openLightbox(imgs.map(function (x) { return { src: x.currentSrc || x.src, alt: x.getAttribute('alt') || '' }; }), imgs.indexOf(im));
     }
-    if (e.target.closest('#mode-btn')) toggleMode();
   });
   window.addEventListener('hashchange', function () {
     if (location.hash !== renderedHash) flushFormDrafts();
@@ -2898,10 +2833,14 @@ function boot() {
   doc.addEventListener('visibilitychange', function () { if (doc.visibilityState === 'hidden') flushFormDrafts(); });
   window.addEventListener('pagehide', function () { cleanups.forEach(function (f) { try { f(); } catch (e) {} }); });
 
-  applyStyle(DATA.site.style);
-  var saved = LS.get(MODE_KEY);
-  if (saved === 'dark' || saved === 'light') applyMode(saved === systemMode() ? null : saved);
-  watchSystemMode();
+  window.addEventListener('resize', function () {
+    var body = doc.getElementById('f-body');
+    if (body && body.offsetParent !== null) autoGrow(body);
+  });
+  if (doc.fonts) doc.fonts.addEventListener('loadingdone', function () {
+    var body = doc.getElementById('f-body');
+    if (body && body.offsetParent !== null) autoGrow(body);
+  });
   if (!location.hash || location.hash === '#' || location.hash === '#/') setHash('#/admin');
   render();
   initAuth();
