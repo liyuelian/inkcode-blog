@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { marked } = require('marked');
 const hljs = require('highlight.js');
 const SiteFiles = require('../admin/files.js');
+const SiteCovers = require('../theme/covers.js');
 const { taxonomyPaths } = require('./taxonomy-paths.js');
 const { tokens } = require('../theme/tokens.js');
 
@@ -239,12 +240,8 @@ function postItem(p) {
     (p.series ? '<span class="sr">系列：' + esc(p.series) + '</span>' : '') +
     p.tags.map((t) => '<span class="tg">#' + esc(t) + '</span>').join('') + '</div></a>';
 }
-const COVERS = ['ink', 'zhu', 'dai', 'zhuye', 'zhe', 'yue'], TPLS = ['thread', 'night', 'sun', 'star', 'note', 'deco'];
 function coverHtml(n) {
-  const author = (n.author || site.name || '').trim();
-  return '<div class="cover ct-' + (TPLS.includes(n.tpl) ? n.tpl : 'thread') + ' cv-' + (COVERS.includes(n.cover) ? n.cover : 'dai') + '" aria-hidden="true">' +
-    '<span class="cv-art"></span><span class="cv-text"><span class="cv-title">' + esc(n.title) + '</span>' +
-    (author ? '<span class="cv-sign"><i>' + esc(author) + ' 著</i><em>' + esc(sealText()) + '</em></span>' : '') + '</span></div>';
+  return SiteCovers.html(n, { siteName: site.name, seal: sealText() });
 }
 const statusText = (n) => (n.status === 'done' ? '已完结' : '连载中');
 function novelCard(n) {

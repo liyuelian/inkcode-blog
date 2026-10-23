@@ -84,15 +84,6 @@ button,input,textarea{font:inherit;color:inherit}
 .cv-sign i{font-style:normal;font-family:var(--cv-serif);font-size:9px;font-size:5.6cqw;letter-spacing:.12em;opacity:.8;white-space:nowrap}
 .cv-sign em{display:none}
 
-/* 线装：布面、针脚、竖排题签、朱印 */
-.ct-thread .cv-art{background:linear-gradient(140deg,rgba(255,255,255,.12),transparent 42%,rgba(0,0,0,.2));box-shadow:inset 6cqw 0 0 rgba(0,0,0,.16)}
-.ct-thread .cv-art::after{left:2cqw;top:8%;bottom:8%;width:2cqw;background:radial-gradient(circle,rgba(255,255,255,.55) .7cqw,transparent 1cqw) center top/2cqw 21%;opacity:.7}
-.ct-thread .cv-text{inset:9% 11% 8% 17%;justify-content:space-between}
-.ct-thread .cv-title{display:block;align-self:flex-start;max-height:66%;writing-mode:vertical-rl;padding:6cqw 3.5cqw;background:#efe8d6;color:#1f1c18;outline:1px solid rgba(0,0,0,.28);outline-offset:-2.4cqw;font-weight:700;font-size:11cqw;letter-spacing:.18em;line-height:1.15}
-.ct-thread .cv-sign{align-self:flex-end;writing-mode:vertical-rl}
-.ct-thread .cv-sign>*{flex:none}
-.ct-thread .cv-sign em{display:block;padding:2cqw 1.6cqw;border-radius:1.2cqw;background:#b2362a;color:#fff6ee;font-family:var(--cv-serif);font-style:normal;font-size:5.4cqw;line-height:1.1;transform:rotate(-3deg)}
-
 /* 夜城：夜空、雨线、月亮、亮着灯的楼群 */
 .ct-night{background:linear-gradient(180deg,#070a12 0%,var(--cv) 82%);color:#f4efe4}
 .ct-night .cv-art{background:repeating-linear-gradient(102deg,transparent 0 4cqw,rgba(255,255,255,.07) 4cqw 4.3cqw)}
@@ -119,13 +110,6 @@ button,input,textarea{font:inherit;color:inherit}
 .ct-star .cv-title{font-family:var(--cv-sans);font-weight:700;font-size:10.5cqw;letter-spacing:.22em}
 .ct-star .cv-sign i{font-family:var(--cv-sans);opacity:.65;letter-spacing:.3em}
 
-/* 手札：横线纸、红色页边线、一段纸胶带 */
-.ct-note{background:linear-gradient(90deg,transparent 14cqw,rgba(200,70,60,.4) 14cqw calc(14cqw + 1px),transparent 0),repeating-linear-gradient(180deg,transparent 0 9cqw,rgba(70,100,150,.2) 9cqw calc(9cqw + 1px)),#f8f3e7;color:#26231e}
-.ct-note .cv-art::before{top:7%;left:28%;width:44%;height:9cqw;background:var(--cv);opacity:.82;transform:rotate(-4deg);box-shadow:0 1px 2px rgba(0,0,0,.15)}
-.ct-note .cv-text{inset:33% 9% auto 21%;gap:4.5cqw}
-.ct-note .cv-title{font-weight:700;font-size:11.5cqw;transform:rotate(-1.5deg);transform-origin:left}
-.ct-note .cv-sign i{opacity:.6}
-
 /* 民国：双线金框、菱形饰、居中排版 */
 .ct-deco .cv-art{inset:6%;border:1px solid #c8a45a;box-shadow:inset 0 0 0 2cqw var(--cv),inset 0 0 0 calc(2cqw + 1px) #c8a45a}
 .ct-deco .cv-art::before,.ct-deco .cv-art::after{left:calc(50% - 2.2cqw);width:4.4cqw;height:4.4cqw;background:#c8a45a;transform:rotate(45deg)}
@@ -140,6 +124,41 @@ button,input,textarea{font:inherit;color:inherit}
 .cv-zhuye{--cv:#3d5a45;--cv-fg:#eaf0e6}
 .cv-zhe{--cv:#87592c;--cv-fg:#f7ecdc}
 .cv-yue{--cv:#d8d1c0;--cv-fg:#2a2620}
+
+/* 远山藏月：纸色、层山、暖月、竖排题名。只影响这一款封面。 */
+.ct-mountain{--cv-land:var(--cv);background:#f1edde;color:#1e302c}
+.ct-mountain.cv-dai{--cv-land:#315852}
+.ct-mountain.cv-yue{--cv-land:#58675e}
+.ct-mountain .cv-art>span{position:absolute}
+.ct-mountain .cv-moon{top:24%;right:18%;width:23%;aspect-ratio:1;border-radius:50%;background:#d4aa6d;opacity:.75}
+.ct-mountain .cv-ridge{left:-3%;right:-3%;bottom:0}
+.ct-mountain .cv-ridge-a{height:49%;background:color-mix(in srgb,var(--cv-land) 27%,#e9e8db);clip-path:polygon(0 38%,22% 8%,48% 44%,76% 0,100% 25%,100% 100%,0 100%)}
+.ct-mountain .cv-ridge-b{height:37%;background:color-mix(in srgb,var(--cv-land) 55%,#d5dfd1);clip-path:polygon(0 26%,31% 0,61% 37%,84% 14%,100% 25%,100% 100%,0 100%)}
+.ct-mountain .cv-ridge-c{height:26%;background:var(--cv-land);clip-path:polygon(0 28%,30% 12%,59% 44%,100% 0,100% 100%,0 100%)}
+.ct-mountain .cv-art .cv-series{top:9%;right:12%;max-height:41%;max-width:19%;writing-mode:vertical-rl;overflow:hidden;font:400 4.5cqw/1.5 var(--cv-sans);letter-spacing:.2em;color:#6a7871;overflow-wrap:anywhere}
+.ct-mountain .cv-text{display:block}
+.ct-mountain .cv-title{position:absolute;display:block;left:13%;top:11%;max-height:64%;max-width:70%;writing-mode:vertical-rl;font-size:var(--cv-title-size,15cqw);font-weight:700;line-height:1.5;letter-spacing:.17em}
+.ct-mountain.cv-long .cv-title{max-height:54%}
+.ct-mountain .cv-sign{position:absolute;display:block;inset:0}
+.ct-mountain .cv-sign i{position:absolute;right:12%;bottom:8%;max-height:40%;max-width:28%;writing-mode:vertical-rl;white-space:normal;overflow-wrap:anywhere;overflow:hidden;color:#f0f2e7;opacity:1;font-family:var(--cv-sans);font-size:5.2cqw;line-height:1.4;letter-spacing:.16em}
+.ct-mountain .cv-sign em{display:block;position:absolute;left:44%;bottom:36%;padding:2cqw 1.4cqw;background:#aa4b37;color:#fff8e9;font:400 4.6cqw/1.2 var(--cv-serif);writing-mode:vertical-rl}
+
+/* 字形海报：灰蓝底、大字书名、轮廓字。其他主色转成浅色纸面。 */
+.ct-poster{--cv-poster:color-mix(in srgb,var(--cv) 30%,#f0eee9);background:var(--cv-poster);color:#293a54}
+.ct-poster.cv-dai{--cv-poster:#aabfe2}
+.ct-poster .cv-art::before{content:"文";left:7%;top:40%;font:700 95cqw/1 var(--cv-serif);color:transparent;-webkit-text-stroke:1px #f0f1f0a6;transform:rotate(-9deg)}
+.ct-poster .cv-art::after{right:12%;top:9%;width:9%;aspect-ratio:1;background:#af503f}
+.ct-poster .cv-series{position:absolute;top:9%;left:12%;max-width:62%;max-height:10%;overflow:hidden;overflow-wrap:anywhere;font:400 4.6cqw/1.5 var(--cv-sans);letter-spacing:.1em}
+.ct-poster .cv-text{display:block}
+.ct-poster .cv-title{position:absolute;display:block;left:12%;top:25%;width:78%;max-height:56%;padding-bottom:.2em;font-family:var(--cv-sans);font-weight:900;font-size:var(--cv-title-size,30cqw);line-height:1.07;letter-spacing:-.06em}
+.ct-poster.cv-long .cv-title{line-height:1.15;letter-spacing:-.035em}
+.ct-poster .cv-sign{position:absolute;display:block;inset:0}
+.ct-poster .cv-sign::before{content:"";position:absolute;left:12%;right:12%;height:1px;bottom:18%;background:#293a5455}
+.ct-poster .cv-sign i{position:absolute;bottom:8%;left:12%;max-width:76%;max-height:13%;white-space:normal;overflow:hidden;overflow-wrap:anywhere;font-family:var(--cv-sans);font-size:5cqw;line-height:1.3;letter-spacing:.1em;opacity:1}
+.ct-poster.cv-custom{--cv-poster:var(--cv);color:var(--cv-fg)}
+.ct-poster.cv-custom .cv-art::before{-webkit-text-stroke-color:var(--cv-fg);opacity:.28}
+.ct-poster.cv-custom .cv-sign::before{background:var(--cv-fg);opacity:.3}
+.ct-mountain.cv-custom .cv-sign i{color:var(--cv-fg)}
 
 /* ---------- 页面标题、搜索、标签 ---------- */
 .page-head{padding:16px 0 14px}

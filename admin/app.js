@@ -36,8 +36,8 @@ function escHtml(s) {
 var doc = document, root = doc.documentElement;
 var app = doc.getElementById('app');
 var NS = 'site:';
-var COVERS = { ink: '墨', zhu: '朱', dai: '黛', zhuye: '竹', zhe: '赭', yue: '月' };
-var TEMPLATES = { thread: '线装', night: '夜城', sun: '留白', star: '星海', note: '手札', deco: '民国' };
+var COVERS = SiteCovers.colors;
+var TEMPLATES = SiteCovers.templates;
 var AUTH = 'pending';            // pending | yes | no
 var GH = null;                   // { repo, branch, token }，保存在这台设备上
 var FILES = {};                  // 仓库里的内容文件（路径 → 文本）
@@ -160,8 +160,8 @@ function normalize(d) {
   d.novels = (Array.isArray(d.novels) ? d.novels : []).filter(function (n) { return n && n.id; });
   d.novels.forEach(function (n) {
     n.title = n.title || '无题'; n.genre = n.genre || ''; n.synopsis = n.synopsis || '';
-    n.status = n.status === 'done' ? 'done' : 'serial'; n.cover = COVERS[n.cover] ? n.cover : 'dai';
-    n.tpl = TEMPLATES[n.tpl] ? n.tpl : 'thread'; n.author = typeof n.author === 'string' ? n.author : '';
+    n.status = n.status === 'done' ? 'done' : 'serial'; n.cover = SiteCovers.colorKey(n.cover);
+    n.tpl = SiteCovers.templateKey(n.tpl); n.author = typeof n.author === 'string' ? n.author : '';
     n.chapters = (Array.isArray(n.chapters) ? n.chapters : []).filter(function (c) { return c && c.id; });
     n.chapters.forEach(function (c) { c.title = c.title || '无题'; c.content = c.content || ''; c.created = c.created || nowISO(); });
     /* 分卷：未分卷的章节排在最前，其余按卷的顺序分组，卷内保持原有顺序 */
@@ -949,12 +949,7 @@ function postItem(p) {
     p.tags.map(function (t) { return '<span class="tg">#' + escHtml(t) + '</span>'; }).join('') + '</div></a>';
 }
 function coverHtml(n) {
-  var tpl = TEMPLATES[n.tpl] ? n.tpl : 'thread', col = COVERS[n.cover] ? n.cover : 'dai';
-  var author = (n.author || DATA.site.name || '').trim();
-  return '<div class="cover ct-' + tpl + ' cv-' + col + '" aria-hidden="true"><span class="cv-art"></span><span class="cv-text">' +
-    '<span class="cv-title">' + escHtml(n.title || '书名') + '</span>' +
-    (author ? '<span class="cv-sign"><i>' + escHtml(author) + ' 著</i><em>' + escHtml(sealText()) + '</em></span>' : '') +
-    '</span></div>';
+  return SiteCovers.html(n, { siteName: DATA.site.name, seal: sealText() });
 }
 function novelWords(n) { return n.chapters.reduce(function (a, c) { return a + wordCount(c.content); }, 0); }
 function novelCard(n) {
@@ -2431,7 +2426,7 @@ function viewEditNovel(id) {
     var isNew = id === 'new';
     var n = isNew ? null : findNovel(id);
     if (!isNew && !n) return notFound('这部作品不存在。', ['#/admin/novels', '回到后台']);
-    var cur = { title: n ? n.title : '', genre: n ? n.genre : '', status: n ? n.status : 'serial', synopsis: n ? n.synopsis : '', cover: n ? n.cover : 'dai', tpl: n ? n.tpl : 'thread', author: n ? n.author : '' };
+    var cur = { title: n ? n.title : '', genre: n ? n.genre : '', status: n ? n.status : 'serial', synopsis: n ? n.synopsis : '', cover: n ? n.cover : 'dai', tpl: n ? n.tpl : SiteCovers.defaultTemplate, author: n ? n.author : '' };
     var html = '<div class="editor"><div class="ed-head"><a class="back" href="' + (isNew ? '#/admin/novels' : '#/novel/' + enc(n.id)) + '">‹ 返回</a>' +
       '<span class="ed-status" id="n-draft-status" aria-live="polite"></span></div><div id="n-draft-slot"></div>' +
       '<h1 class="ed-h">' + (isNew ? '新建小说' : '管理作品') + '</h1>' +
@@ -2443,11 +2438,13 @@ function viewEditNovel(id) {
       '<button type="button" data-v="serial">连载中</button><button type="button" data-v="done">已完结</button></div></div>' +
       '</div></div>' +
       '<label class="field"><span>简介</span><textarea class="input" id="n-syn" rows="4" maxlength="800"></textarea></label>' +
-      '<div class="field"><span>封面样式</span><div class="tpl-grid" id="n-tpl"></div>' +
-      '<small class="hint">书名和署名会自动排进封面。署名留空时使用网站名称。</small></div>' +
-      '<div class="field"><span>封面主色</span><div class="swatches" id="n-cover">' + Object.keys(COVERS).map(function (k) {
+      '<section class="cover-design" aria-label="封面设计"><div class="field cover-colors"><span>封面主色</span><div class="cover-color-controls"><div class="swatches" id="n-cover">' + Object.keys(COVERS).map(function (k) {
         return '<button type="button" class="sw cv-' + k + '" data-v="' + k + '" aria-label="' + COVERS[k] + '色">' + COVERS[k] + '</button>';
-      }).join('') + '</div></div>' +
+      }).join('') + '</div><div class="cover-custom" id="n-custom">' +
+      '<label class="cover-color-picker"><input type="color" id="n-custom-color" aria-label="自定义封面颜色" value="' + SiteCovers.colorValue(cur.cover, cur.tpl) + '"><span>自定义</span></label>' +
+      '<input class="input cover-hex" id="n-color-hex" aria-label="封面颜色代码" type="text" maxlength="7" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="#RRGGBB"></div></div></div>' +
+      '<div class="field"><span>封面样式</span><div class="tpl-grid" id="n-tpl"></div>' +
+      '<small class="hint">书名和署名会自动排进封面。署名留空时使用网站名称。</small></div></section>' +
       '<button type="button" class="btn primary block" id="n-save">' + (isNew ? '创建作品' : '保存作品信息') + '</button>' +
       (isNew ? '' : '<div class="row-head"><h2>章节与分卷</h2>' +
         '<a class="btn sm primary" href="#/edit/chapter/' + enc(n.id) + '/new">写新章节</a></div>' +
@@ -2474,7 +2471,11 @@ function viewEditNovel(id) {
         };
         var drawPick = function () {
           $$('#n-status button', main).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === cur.status); });
-          $$('#n-cover button', main).forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-v') === cur.cover); });
+          $$('#n-cover button', main).forEach(function (b) { var on = b.getAttribute('data-v') === cur.cover; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+          $('#n-custom', main).classList.toggle('on', SiteCovers.isCustomColor(cur.cover));
+          var value = SiteCovers.colorValue(cur.cover, cur.tpl), hex = $('#n-color-hex', main);
+          $('#n-custom-color', main).value = value; hex.value = value;
+          hex.setCustomValidity(''); hex.removeAttribute('aria-invalid');
         };
         drawCover(); drawPick();
         var infoDraft = mountFormDraft(main, {
@@ -2486,8 +2487,8 @@ function viewEditNovel(id) {
               if (typeof d[pair[1]] === 'string') pair[0].value = d[pair[1]];
             });
             cur.status = d.status === 'done' ? 'done' : 'serial';
-            if (COVERS[d.cover]) cur.cover = d.cover;
-            if (TEMPLATES[d.tpl]) cur.tpl = d.tpl;
+            if (typeof d.cover === 'string') cur.cover = SiteCovers.colorKey(d.cover);
+            if (typeof d.tpl === 'string') cur.tpl = SiteCovers.templateKey(d.tpl);
             drawCover(); drawPick();
           }
         });
@@ -2496,7 +2497,7 @@ function viewEditNovel(id) {
         g.addEventListener('input', infoDraft.change);
         syn.addEventListener('input', infoDraft.change);
         $('#n-tpl', main).addEventListener('click', function (e) {
-          var b = e.target.closest('[data-v]'); if (!b) return; cur.tpl = b.getAttribute('data-v'); drawCover(); infoDraft.change();
+          var b = e.target.closest('[data-v]'); if (!b) return; cur.tpl = b.getAttribute('data-v'); drawCover(); drawPick(); infoDraft.change();
         });
         $('#n-status', main).addEventListener('click', function (e) {
           var b = e.target.closest('[data-v]'); if (!b) return; cur.status = b.getAttribute('data-v'); drawPick(); infoDraft.change();
@@ -2504,7 +2505,17 @@ function viewEditNovel(id) {
         $('#n-cover', main).addEventListener('click', function (e) {
           var b = e.target.closest('[data-v]'); if (!b) return; cur.cover = b.getAttribute('data-v'); drawPick(); drawCover(); infoDraft.change();
         });
+        var setCustomColor = function (value) {
+          var hex = $('#n-color-hex', main), valid = SiteCovers.isCustomColor(value);
+          hex.setCustomValidity(valid ? '' : '请输入六位颜色代码，例如 #315852。');
+          if (!valid) { hex.setAttribute('aria-invalid', 'true'); return; }
+          cur.cover = SiteCovers.colorKey(value); drawPick(); drawCover(); infoDraft.change();
+        };
+        $('#n-custom-color', main).addEventListener('input', function (e) { setCustomColor(e.target.value); });
+        $('#n-custom-color', main).addEventListener('change', function (e) { setCustomColor(e.target.value); });
+        $('#n-color-hex', main).addEventListener('input', function (e) { setCustomColor(e.target.value.trim()); });
         $('#n-save', main).addEventListener('click', function () {
+          if (!$('#n-color-hex', main).reportValidity()) return;
           var title = t.value.trim();
           if (!title) { toast('先写书名。'); t.focus(); return; }
           var nid = entityId;

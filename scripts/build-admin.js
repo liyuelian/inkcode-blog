@@ -16,9 +16,11 @@ module.exports = function buildAdmin(o) {
   const name = site.name || '我的网站';
 
   const appJs = src('admin/app.js'), filesJs = src('admin/files.js');
+  const coversJs = src('theme/covers.js');
   const css = o.css + '\n' + src('theme/admin.css');
   fs.writeFileSync(path.join(dir, 'app.js'), appJs);
   fs.writeFileSync(path.join(dir, 'files.js'), filesJs);
+  fs.writeFileSync(path.join(dir, 'covers.js'), coversJs);
   fs.writeFileSync(path.join(dir, 'admin.css'), css);
   for (const icon of ['icon-192.png', 'icon-512.png']) fs.copyFileSync(path.join(o.ROOT, 'admin', icon), path.join(dir, icon));
 
@@ -52,6 +54,7 @@ module.exports = function buildAdmin(o) {
     '<script>window.SITE_CONFIG=' + JSON.stringify(config).replace(/</g, '\\u003c') + ';</script>\n' +
     '<script src="' + appearance.scriptUrl + '"></script>\n' +
     '<script src="files.js?v=' + hash(filesJs) + '"></script>\n' +
+    '<script src="covers.js?v=' + hash(coversJs) + '"></script>\n' +
     '<script src="app.js?v=' + hash(appJs) + '"></script>\n</body>\n</html>\n';
   fs.writeFileSync(path.join(dir, 'index.html'), html);
 };

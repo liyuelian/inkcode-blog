@@ -18,3 +18,16 @@
 .draft-choices{display:block}
 .draft-choices>div+div{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}
 .draft-choices span{overflow-wrap:anywhere}
+.cover-custom{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px}
+.cover-color-picker{display:flex;align-items:center;gap:8px;font-family:var(--font-ui);font-size:14px}
+.cover-color-picker input{width:46px;height:46px;padding:3px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg2);cursor:pointer}
+.cover-custom.on .cover-color-picker{color:var(--accent)}
+.cover-custom.on .cover-color-picker input{border-color:var(--accent)}
+.cover-hex.input{width:132px;min-width:0;font-family:var(--font-mono);font-size:16px}
+.cover-hex[aria-invalid="true"]{border-color:var(--danger)}
+.cover-colors{position:sticky;top:calc(env(safe-area-inset-top,0px) + 56px);z-index:6;margin:0 -6px 16px;padding:10px 6px 12px;background:var(--bg);border-bottom:1px solid var(--line)}
+.cover-color-controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px 14px}
+.cover-colors .sw{width:44px;height:44px}
+.cover-colors .cover-custom{margin-top:0}
+.cover-design .tpl{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 224px)}
+@media(max-width:340px){.cover-colors .swatches{gap:3px}}

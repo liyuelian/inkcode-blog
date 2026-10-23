@@ -40,7 +40,7 @@ const model = {
     pinned: !!p.pinned, draft: !!p.draft, created: p.created, updated: p.updated || p.created, content: fixImages(p.content)
   })),
   novels: (data.novels || []).map((n) => ({
-    id: n.id, title: n.title, genre: n.genre || '', status: n.status || 'serial', tpl: n.tpl || 'thread', cover: n.cover || 'dai',
+    id: n.id, title: n.title, genre: n.genre || '', status: n.status || 'serial', tpl: n.tpl || 'mountain', cover: n.cover || 'dai',
     author: n.author || '', created: n.created || (n.chapters && n.chapters[0] && n.chapters[0].created) || new Date().toISOString(),
     updated: n.updated, synopsis: n.synopsis || '', volumes: n.volumes || [],
     chapters: (n.chapters || []).map((c) => ({
